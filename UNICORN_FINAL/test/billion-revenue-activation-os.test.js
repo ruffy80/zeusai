@@ -33,13 +33,18 @@ function check(name, fn) {
 }
 
 async function main() {
-  await check('productCatalog seeds ≥10 curated SKUs', () => {
+  await check('productCatalog seeds ≥10 curated SKUs with buyability fence', () => {
     catalog.ensureRevenueSkus();
     const items = catalog.list();
     assert.ok(items.length >= 10, 'expected ≥10 SKUs, got ' + items.length);
     for (const id of ['esim-eu-5gb', 'api-access-pro', 'enterprise-license', 'quantum-identity-shield']) {
       assert.ok(catalog.get(id), 'missing ' + id);
     }
+    const blocked = catalog.get('quantum-identity-shield');
+    assert.strictEqual(blocked.buyable, false, 'theater SKUs must not be buyable');
+    const buyable = catalog.list({ buyableOnly: true });
+    assert.ok(buyable.length >= 5, 'expected ≥5 buyable SKUs');
+    assert.ok(buyable.every((s) => s.buyable !== false));
     assert.ok(String(catalog.BTC_ADDRESS).startsWith('bc1q4f7e66'));
   });
 

@@ -117,6 +117,14 @@ const STABLE_START_ALLOW = new Set([
   'total-autonomy-activation-continuum',
   'revenue-invention-continuum-os',
   'billion-autonomy-loop-os',
+  'reality-ops-continuum',
+  'realityOpsContinuum',
+  'live-pricing-broker',
+  'livePricingBroker',
+  'money-path-causal-twin',
+  'moneyPathCausalTwin',
+  'checkout-recovery-agent',
+  'checkoutRecoveryAgent',
 ]);
 
 /** Commerce / payment — monitor+register only unless configured */

@@ -24,18 +24,19 @@ const crypto = require('crypto');
 const _router = require('./sovereignRevenueRouter');
 
 const _MARKETPLACES = [
-  { id: 'aws-marketplace',         category: 'cloud',     reachUsers: 5_000_000,  takeRatePct: 5.0 },
-  { id: 'gcp-marketplace',         category: 'cloud',     reachUsers: 2_500_000,  takeRatePct: 5.0 },
-  { id: 'azure-marketplace',       category: 'cloud',     reachUsers: 4_000_000,  takeRatePct: 5.0 },
-  { id: 'salesforce-appexchange',  category: 'crm',       reachUsers: 3_500_000,  takeRatePct: 15.0 },
-  { id: 'shopify-app-store',       category: 'commerce',  reachUsers: 2_000_000,  takeRatePct: 20.0 },
-  { id: 'appsumo',                 category: 'saas',      reachUsers:   500_000,  takeRatePct: 30.0 },
-  { id: 'product-hunt',            category: 'saas',      reachUsers: 5_000_000,  takeRatePct: 0.0 },
-  { id: 'g2',                      category: 'review',    reachUsers: 5_000_000,  takeRatePct: 0.0 },
-  { id: 'capterra',                category: 'review',    reachUsers: 4_000_000,  takeRatePct: 0.0 },
-  { id: 'atlassian-marketplace',   category: 'devops',    reachUsers:   400_000,  takeRatePct: 25.0 },
-  { id: 'github-marketplace',      category: 'devops',    reachUsers: 1_000_000,  takeRatePct: 0.0 },
-  { id: 'zeusai-internal',         category: 'native',    reachUsers:   100_000,  takeRatePct: 0.0 },
+  // Catalog of listing targets only — no invented audience sizes.
+  { id: 'aws-marketplace',         category: 'cloud',     takeRatePct: 5.0 },
+  { id: 'gcp-marketplace',         category: 'cloud',     takeRatePct: 5.0 },
+  { id: 'azure-marketplace',       category: 'cloud',     takeRatePct: 5.0 },
+  { id: 'salesforce-appexchange',  category: 'crm',       takeRatePct: 15.0 },
+  { id: 'shopify-app-store',       category: 'commerce',  takeRatePct: 20.0 },
+  { id: 'appsumo',                 category: 'saas',      takeRatePct: 30.0 },
+  { id: 'product-hunt',            category: 'saas',      takeRatePct: 0.0 },
+  { id: 'g2',                      category: 'review',    takeRatePct: 0.0 },
+  { id: 'capterra',                category: 'review',    takeRatePct: 0.0 },
+  { id: 'atlassian-marketplace',   category: 'devops',    takeRatePct: 25.0 },
+  { id: 'github-marketplace',      category: 'devops',    takeRatePct: 0.0 },
+  { id: 'zeusai-internal',         category: 'native',    takeRatePct: 0.0 },
 ];
 
 const _listings = new Map(); // listingId → { product, marketplaces, listedAt }
@@ -44,25 +45,27 @@ const _maxInMemory = 5000;
 
 function listMarketplaces() {
   return _MARKETPLACES.map((m) => ({
-    ...m,
+    id: m.id,
+    category: m.category,
+    takeRatePct: m.takeRatePct,
     live: false,
-    listed: false,
-    reachUsers: m.reachUsers,
-    reachNote: 'catalog_estimate_not_live_traffic',
+    listed: _listings.size > 0 && [..._listings.values()].some((l) => (l.marketplaces || []).includes(m.id)),
+    reachUsers: null,
+    reachNote: 'no_invented_reach — wire marketplace APIs for live audience',
   }));
 }
 
 function reach() {
-  const totalReachUsers = _MARKETPLACES.reduce((s, m) => s + m.reachUsers, 0);
   return {
     ok: true,
-    simulated: true,
+    simulated: false,
     live: false,
     generatedAt: new Date().toISOString(),
-    totalReachUsers,
+    totalReachUsers: null,
     marketplaceCount: _MARKETPLACES.length,
+    listedCount: _listings.size,
     avgTakeRatePct: Number((_MARKETPLACES.reduce((s, m) => s + m.takeRatePct, 0) / _MARKETPLACES.length).toFixed(2)),
-    note: 'In-memory catalog estimates — no external marketplace APIs called',
+    note: 'Listing readiness only — audience reach is null until external marketplace APIs are armed',
   };
 }
 
@@ -148,11 +151,12 @@ function getStatus() {
     ok: true,
     name: 'globalMonetizationMesh',
     live: false,
-    simulated: true,
+    simulated: false,
+    inventsReach: false,
     marketplaces: _MARKETPLACES.length,
     listings: _listings.size,
     sales: _sales.length,
-    note: 'catalog_and_in_memory_only',
+    note: 'listing_readiness_only — sales events marked simulated until live marketplace webhooks',
   };
 }
 
