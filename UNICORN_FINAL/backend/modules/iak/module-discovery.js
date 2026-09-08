@@ -125,6 +125,8 @@ const STABLE_START_ALLOW = new Set([
   'moneyPathCausalTwin',
   'checkout-recovery-agent',
   'checkoutRecoveryAgent',
+  'commerce-bond-loop-os',
+  'commerceBondLoopOs',
 ]);
 
 /** Commerce / payment — monitor+register only unless configured */

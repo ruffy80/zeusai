@@ -1626,6 +1626,7 @@ async function proxyToSite(req, res, urlPath) {
 }
 app.get('/api/catalog/master', (req, res) => proxyToSite(req, res, '/api/catalog/master'));
 app.get('/api/catalog/diff',   (req, res) => proxyToSite(req, res, '/api/catalog/diff'));
+// One catalog truth: prefer site master items; never split-brain vs storefront.
 // API contract bridge: single public source for frontend/backend compatibility.
 app.get('/api/contract', (req, res) => proxyToSite(req, res, '/openapi-public.json'));
 app.get('/.well-known/contract', (req, res) => proxyToSite(req, res, '/openapi-public.json'));
@@ -5184,6 +5185,35 @@ try {
   console.warn('[MPCT] load/start failed:', e && e.message);
 }
 
+// CBLOS/1.0 — Commerce Bond Loop (site↔backend catalog/quote/rate alignment; no GMV invention)
+let commerceBondLoopOs = null;
+try {
+  commerceBondLoopOs = require('./modules/commerce-bond-loop-os');
+  if (process.env.NODE_ENV !== 'test' && process.env.CBLOS_DISABLED !== '1') {
+    commerceBondLoopOs.start();
+  }
+  console.log('🔗 CBLOS/1.0 Commerce Bond Loop: MOUNTED');
+} catch (e) {
+  console.warn('[CBLOS] load/start failed:', e && e.message);
+}
+
+function _cblosBtc(rate) {
+  try {
+    const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+    const n = Number(rate && (rate.rate || rate.usdPerBtc || rate.usd));
+    if (Number.isFinite(n) && n > 0) cblos.recordBeat('btc_rate', { peer: 'unicorn', btcRateUsd: n });
+  } catch (_) { /* observe-only */ }
+}
+function _cblosQuote(serviceId, priceUsd) {
+  try {
+    const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+    const n = Number(priceUsd);
+    if (serviceId && Number.isFinite(n)) {
+      cblos.recordBeat('quote', { peer: 'unicorn', serviceId: String(serviceId), priceUsd: n });
+    }
+  } catch (_) { /* observe-only */ }
+}
+
 // AGDE / WGC/1.0 — World Gravity Continuum: bottleneck→dispatch over real growth organs
 let autonomousGlobalDominanceEngine = null;
 try {
@@ -5203,9 +5233,46 @@ try {
 
 // --- API: SaaS Catalog (REAL, derived from live engines) ---
 app.get('/api/catalog', async (req, res) => {
+  const skipSite = process.env.NODE_ENV === 'test' || process.env.UNICORN_CATALOG_SITE_PROXY === '0';
+  if (!skipSite) {
+    try {
+      const target = SITE_INTERNAL_BASE + '/api/catalog';
+      const r = await fetch(target, {
+        headers: { Accept: 'application/json', 'User-Agent': 'unicorn-backend-proxy/1.0' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (r.ok) {
+        const text = await r.text();
+        res.setHeader('X-Proxied-From', 'unicorn-site');
+        res.setHeader('X-Catalog-Truth', 'site');
+        const ct = r.headers.get('content-type');
+        if (ct) res.setHeader('Content-Type', ct);
+        try {
+          const parsed = JSON.parse(text);
+          const items = Array.isArray(parsed) ? parsed : (parsed && parsed.items) || [];
+          const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+          cblos.recordBeat('catalog_snapshot', {
+            peer: 'unicorn',
+            catalogHash: cblos.hashCatalog(items),
+          });
+        } catch (_) { /* ignore */ }
+        return res.status(r.status).send(text);
+      }
+    } catch (_) { /* site dark — local seed */ }
+  }
   try {
     const live = buildLiveSaasCatalog();
-    if (live && live.length) return res.json(live);
+    if (live && live.length) {
+      res.setHeader('X-Catalog-Truth', 'backend-fallback');
+      try {
+        const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+        cblos.recordBeat('catalog_snapshot', {
+          peer: 'unicorn',
+          catalogHash: cblos.hashCatalog(live),
+        });
+      } catch (_) { /* observe-only */ }
+      return res.json(live);
+    }
     return res.status(503).json({ ok: false, error: 'catalog sources unavailable' });
   } catch (err) {
     return res.status(503).json({ ok: false, error: 'catalog build failed', detail: err && err.message });
@@ -5399,14 +5466,11 @@ const _PUBLIC_HEALTH_CACHE_TTL_MS = Math.max(
   Math.min(5000, Number(process.env.UNICORN_PUBLIC_HEALTH_CACHE_MS || 4000))
 );
 let _publicHealthCache = { at: 0, body: null };
+let _publicHealthRefreshing = false;
 
-function buildPublicHealthResponse() {
-  const now = Date.now();
-  if (_publicHealthCache.body && (now - _publicHealthCache.at) < _PUBLIC_HEALTH_CACHE_TTL_MS) {
-    return _publicHealthCache.body;
-  }
+function _composePublicHealthBody() {
   const full = buildHealthResponse();
-  const body = {
+  return {
     status: full.status,
     ok: full.status === 'ok',
     uptime: full.uptime,
@@ -5422,9 +5486,52 @@ function buildPublicHealthResponse() {
     neuralAutonomy: full.neuralAutonomy,
     siteBond: full.siteBond,
     triadBond: full.triadBond,
+    commerceBond: (function () {
+      try {
+        const c = require('./modules/commerce-bond-loop-os');
+        return typeof c.getScore === 'function' ? c.getScore() : undefined;
+      } catch (_) { return undefined; }
+    })(),
   };
+}
+
+function _refreshPublicHealthCache() {
+  if (_publicHealthRefreshing) return;
+  _publicHealthRefreshing = true;
+  setImmediate(() => {
+    try {
+      const body = _composePublicHealthBody();
+      _publicHealthCache = { at: Date.now(), body };
+    } catch (_) { /* keep last good */ }
+    _publicHealthRefreshing = false;
+  });
+}
+
+function buildPublicHealthResponse() {
+  const now = Date.now();
+  if (_publicHealthCache.body && (now - _publicHealthCache.at) < _PUBLIC_HEALTH_CACHE_TTL_MS) {
+    return _publicHealthCache.body;
+  }
+  // Stale-while-revalidate: never stall the site monitor / nginx on a heavy rebuild.
+  if (_publicHealthCache.body) {
+    _refreshPublicHealthCache();
+    return _publicHealthCache.body;
+  }
+  const body = _composePublicHealthBody();
   _publicHealthCache = { at: now, body };
   return body;
+}
+
+function livenessHealth() {
+  return {
+    ok: true,
+    status: 'ok',
+    ready: true,
+    live: true,
+    uptime: Math.floor(process.uptime()),
+    ts: new Date().toISOString(),
+    protocol: 'UNICORN_LIVENESS/1.0',
+  };
 }
 
 // /health (non-prefixed) — used by uptime monitors. Public + redacted.
@@ -5434,8 +5541,13 @@ function _publicHealthHandler(req, res) {
   res.set('Cache-Control', 'no-store, no-cache');
   res.json(buildPublicHealthResponse());
 }
+function _livenessHealthHandler(req, res) {
+  res.set('Cache-Control', 'no-store, no-cache');
+  res.json(livenessHealth());
+}
 app.get('/health', _publicHealthHandler);
 app.get('/api/health', _publicHealthHandler);
+app.get('/api/health/live', _livenessHealthHandler);
 
 // Full, unredacted health — admin-only diagnostic surface.
 app.get('/api/health/full', adminTokenMiddleware, (req, res) => {
@@ -9008,6 +9120,16 @@ app.post('/api/mpct/tick', adminTokenMiddleware, (req, res) => {
   }
 });
 
+app.get(['/api/cblos/status', '/api/cblos', '/.well-known/commerce-bond.json'], (req, res) => {
+  try {
+    const m = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+    res.set('Cache-Control', 'public, max-age=8');
+    return res.json(m.discovery());
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'CBLOS/1.0' });
+  }
+});
+
 app.get(['/api/billion-scale/post-pay', '/api/post-pay/status'], (req, res) => {
   try {
     const ppcos = require('../src/commerce/post-pay-closure-os');
@@ -10256,6 +10378,7 @@ app.get('/api/pricing/:serviceId', async (req, res) => {
   }
   const priceUsd = Number(dp.finalPrice || 0);
   const priceBtc = btcRate > 0 ? Math.round((priceUsd / btcRate) * 1e8) / 1e8 : null;
+  _cblosQuote(serviceId, priceUsd);
   res.set('Cache-Control', 'no-store');
   res.json({
     serviceId,
@@ -10634,7 +10757,9 @@ app.get('/api/payments/config/status', (req, res) => {
 
 app.get('/api/payment/btc-rate', async (req, res) => {
   try {
-    res.json(await paymentGateway.getBitcoinRate());
+    const rate = await paymentGateway.getBitcoinRate();
+    _cblosBtc(rate);
+    res.json(rate);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -10644,7 +10769,9 @@ app.get('/api/payment/btc-rate', async (req, res) => {
 // Returns the same payload as /api/payment/btc-rate.
 app.get('/api/btc/rate', async (req, res) => {
   try {
-    res.json(await paymentGateway.getBitcoinRate());
+    const rate = await paymentGateway.getBitcoinRate();
+    _cblosBtc(rate);
+    res.json(rate);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -10661,6 +10788,7 @@ app.get('/api/btc/spot', async (req, res) => {
   try {
     const r = await paymentGateway.getBitcoinRate();
     const usdPerBtc = Number(r && r.rate) || 0;
+    _cblosBtc(r || { rate: usdPerBtc });
     res.set('Cache-Control', 'public, max-age=60');
     res.json({
       usdPerBtc,

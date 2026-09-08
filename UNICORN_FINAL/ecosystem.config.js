@@ -299,7 +299,7 @@ module.exports = {
         BIND_HOST: process.env.BIND_HOST || '127.0.0.1',
         BACKEND_API_URL: 'http://127.0.0.1:3000',
         // Site health monitor + proxy target (documented separately from BACKEND_API_URL).
-        UNICORN_SITE_INTERNAL_BACKEND: process.env.UNICORN_SITE_INTERNAL_BACKEND || 'http://127.0.0.1:3000/api/health',
+        UNICORN_SITE_INTERNAL_BACKEND: process.env.UNICORN_SITE_INTERNAL_BACKEND || 'http://127.0.0.1:3000/api/health/live',
         BACKEND_ORIGIN: process.env.BACKEND_ORIGIN || 'http://127.0.0.1:3000',
         // Same ops-pm2 guards as backend — site also serves /api/ops/dashboard.
         OPS_PM2_BOOT_GRACE_MS: process.env.OPS_PM2_BOOT_GRACE_MS || '120000',

@@ -83,12 +83,13 @@ check('globalMonetizationMesh does not invent reachUsers totals', () => {
   assert.ok(ms.every((m) => m.reachUsers == null));
 });
 
-check('IAK stable allowlist includes ROCS + MPCT + live-pricing', () => {
+check('IAK stable allowlist includes ROCS + MPCT + live-pricing + CBLOS', () => {
   const disc = require('../backend/modules/iak/module-discovery');
   const allow = disc.STABLE_START_ALLOW;
   assert.ok(allow.has('reality-ops-continuum'));
   assert.ok(allow.has('money-path-causal-twin'));
   assert.ok(allow.has('live-pricing-broker'));
+  assert.ok(allow.has('commerce-bond-loop-os'));
 });
 
 check('MPCT advances only on attested sense — never invents GMV', () => {
