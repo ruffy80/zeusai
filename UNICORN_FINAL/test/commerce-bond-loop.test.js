@@ -214,5 +214,32 @@ check('beats.jsonl rotates to MAX_BEATS', () => {
   assert.strictEqual(r.status, 0, (r.stderr || r.stdout || '').slice(0, 400));
 });
 
+check('recordBeat re-reads peer lines before write so rotate cannot drop them', () => {
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cblos-peer-'));
+  const r = spawnSync(process.execPath, ['-e', `
+    process.env.NODE_ENV = 'test';
+    process.env.CBLOS_DATA_DIR = ${JSON.stringify(dir)};
+    const fs = require('fs');
+    const path = require('path');
+    const c = require(${JSON.stringify(MOD)});
+    c.recordBeat('catalog_snapshot', { peer: 'site', catalogHash: 'samehash' });
+    const p = path.join(${JSON.stringify(dir)}, 'beats.jsonl');
+    fs.appendFileSync(p, JSON.stringify({
+      v: '1', protocol: 'CBLOS/1.0', kind: 'catalog_snapshot',
+      peer: 'unicorn', catalogHash: 'samehash', ts: new Date().toISOString()
+    }) + '\\n');
+    c.recordBeat('quote', { peer: 'site', serviceId: 'starter', priceUsd: 19 });
+    const sc = c.getScore();
+    if (sc.parts.catalog !== 40) {
+      console.error('catalogPts=' + sc.parts.catalog + ' beats=' + sc.beats);
+      process.exit(2);
+    }
+    process.exit(0);
+  `], { encoding: 'utf8', timeout: 15000 });
+  assert.strictEqual(r.status, 0, (r.stderr || r.stdout || '').slice(0, 400));
+});
+
 console.log(`\n✅ commerce-bond-loop: ${passed} tests passed\n`);
 process.exit(0);

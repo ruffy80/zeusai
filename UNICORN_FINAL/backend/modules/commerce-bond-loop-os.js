@@ -4,7 +4,8 @@
  * Site↔backend profit-path alignment without inventing GMV.
  *
  * Two processes share beats via data/cblos/beats.jsonl (capped + rotated).
- * Score hydrates from disk only when the file mtime changes.
+ * Writers take a lock, re-read the file, then append/rotate so a peer's
+ * lines are never dropped. Score always reloads from disk (≤200 lines).
  *
  * Score (0–100):
  *   40 catalog id+price hash match (site vs unicorn)
@@ -33,7 +34,6 @@ const _state = {
   _timer: null,
   _senseTimer: null,
   _sensing: false,
-  _fileMtimeMs: 0,
 };
 
 function _persistEnabled() {
@@ -44,6 +44,50 @@ function _ensureDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) { /* ignore */ }
 }
 
+function _sleepMs(ms) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) { /* short lock wait */ }
+}
+
+function _withBeatsLock(fn) {
+  if (!_persistEnabled()) return fn();
+  _ensureDir();
+  const lockPath = BEATS_FILE + '.lock';
+  let fd = null;
+  for (let i = 0; i < 40; i++) {
+    try {
+      fd = fs.openSync(lockPath, 'wx');
+      break;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') break;
+      try {
+        const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        if (age > 2500) fs.unlinkSync(lockPath);
+      } catch (_) { /* ignore */ }
+      _sleepMs(5);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (fd != null) {
+      try { fs.closeSync(fd); } catch (_) { /* ignore */ }
+      try { fs.unlinkSync(lockPath); } catch (_) { /* ignore */ }
+    }
+  }
+}
+
+function _readBeatsFile() {
+  if (!fs.existsSync(BEATS_FILE)) return [];
+  const raw = fs.readFileSync(BEATS_FILE, 'utf8');
+  const loaded = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try { loaded.push(JSON.parse(line)); } catch (_) { /* skip bad line */ }
+  }
+  return loaded.slice(-MAX_BEATS);
+}
+
 function _rotateFile(beats) {
   const keep = (Array.isArray(beats) ? beats : []).slice(-MAX_BEATS);
   _ensureDir();
@@ -51,24 +95,12 @@ function _rotateFile(beats) {
   const body = keep.length ? keep.map((b) => JSON.stringify(b)).join('\n') + '\n' : '';
   fs.writeFileSync(tmp, body);
   fs.renameSync(tmp, BEATS_FILE);
-  try { _state._fileMtimeMs = fs.statSync(BEATS_FILE).mtimeMs; } catch (_) { _state._fileMtimeMs = Date.now(); }
 }
 
 function _hydrate() {
   if (!_persistEnabled()) return;
   try {
-    if (!fs.existsSync(BEATS_FILE)) return;
-    const st = fs.statSync(BEATS_FILE);
-    if (st.mtimeMs === _state._fileMtimeMs && _state.beats.length) return;
-    const raw = fs.readFileSync(BEATS_FILE, 'utf8');
-    const loaded = [];
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try { loaded.push(JSON.parse(line)); } catch (_) { /* skip bad line */ }
-    }
-    _state.beats = loaded.slice(-MAX_BEATS);
-    _state._fileMtimeMs = st.mtimeMs;
-    if (loaded.length > MAX_BEATS) _rotateFile(_state.beats);
+    _state.beats = _readBeatsFile();
   } catch (_) { /* keep in-memory */ }
 }
 
@@ -99,19 +131,21 @@ function recordBeat(kind, payload = {}) {
     orderId: payload.orderId ? String(payload.orderId).slice(0, 80) : undefined,
     ts: new Date().toISOString(),
   };
-  _state.beats.push(beat);
-  if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
-  if (_persistEnabled()) {
-    _ensureDir();
-    try {
-      if (_state.beats.length >= MAX_BEATS) {
-        _rotateFile(_state.beats);
-      } else {
-        fs.appendFileSync(BEATS_FILE, JSON.stringify(beat) + '\n');
-        try { _state._fileMtimeMs = fs.statSync(BEATS_FILE).mtimeMs; } catch (_) { /* ignore */ }
-      }
-    } catch (_) { /* ignore */ }
+  if (!_persistEnabled()) {
+    _state.beats.push(beat);
+    if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
+    return beat;
   }
+  _withBeatsLock(() => {
+    _hydrate();
+    _state.beats.push(beat);
+    if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
+    if (_state.beats.length >= MAX_BEATS) {
+      _rotateFile(_state.beats);
+    } else {
+      fs.appendFileSync(BEATS_FILE, JSON.stringify(beat) + '\n');
+    }
+  });
   return beat;
 }
 
@@ -256,7 +290,6 @@ function stop() {
 function _resetForTests() {
   _state.beats = [];
   _state.lastScore = null;
-  _state._fileMtimeMs = 0;
   stop();
 }
 
