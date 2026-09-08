@@ -14,34 +14,43 @@ const BTC_ADDRESS =
 const SKUS = new Map();
 
 const SEED = [
-  { id: 'esim-eu-5gb', name: 'Plan eSIM Europa 5GB', priceUsd: 20, billing: 'one-time', category: 'connectivity' },
-  { id: 'esim-global-10gb', name: 'Plan eSIM Global 10GB', priceUsd: 50, billing: 'one-time', category: 'connectivity' },
-  { id: 'api-access-pro', name: 'API Access Pro', priceUsd: 99, billing: 'monthly', category: 'api' },
-  { id: 'ai-consulting-hour', name: 'AI Consulting Hour', priceUsd: 150, billing: 'hourly', category: 'services' },
-  { id: 'carbon-credits-trading', name: 'Carbon Credits Trading', priceUsd: 500, billing: 'monthly', category: 'carbon' },
-  { id: 'quantum-identity-shield', name: 'Quantum Identity Shield', priceUsd: 79, billing: 'monthly', category: 'security' },
-  { id: 'autonomous-negotiation', name: 'Autonomous Negotiation', priceUsd: 199, billing: 'monthly', category: 'negotiation' },
-  { id: 'predictive-analytics', name: 'Predictive Analytics', priceUsd: 299, billing: 'monthly', category: 'analytics' },
-  { id: 'custom-module-dev', name: 'Custom Module Development', priceUsd: 999, billing: 'one-time', category: 'services' },
-  { id: 'enterprise-license', name: 'Enterprise License', priceUsd: 1999, billing: 'monthly', category: 'enterprise' },
+  // Deliverable / desk-or-entitlement paths (buyable).
+  { id: 'esim-eu-5gb', name: 'Plan eSIM Europa 5GB', priceUsd: 20, billing: 'one-time', category: 'connectivity', buyable: true, fulfillable: true, fulfillment: 'desk' },
+  { id: 'esim-global-10gb', name: 'Plan eSIM Global 10GB', priceUsd: 50, billing: 'one-time', category: 'connectivity', buyable: true, fulfillable: true, fulfillment: 'desk' },
+  { id: 'api-access-pro', name: 'API Access Pro', priceUsd: 99, billing: 'monthly', category: 'api', buyable: true, fulfillable: true, fulfillment: 'entitlement' },
+  { id: 'ai-consulting-hour', name: 'AI Consulting Hour', priceUsd: 150, billing: 'hourly', category: 'services', buyable: true, fulfillable: true, fulfillment: 'desk' },
+  { id: 'predictive-analytics', name: 'Predictive Analytics', priceUsd: 299, billing: 'monthly', category: 'analytics', buyable: true, fulfillable: true, fulfillment: 'entitlement' },
+  { id: 'custom-module-dev', name: 'Custom Module Development', priceUsd: 999, billing: 'one-time', category: 'services', buyable: true, fulfillable: true, fulfillment: 'desk' },
+  { id: 'enterprise-license', name: 'Enterprise License', priceUsd: 1999, billing: 'monthly', category: 'enterprise', buyable: true, fulfillable: true, fulfillment: 'entitlement' },
+  // Theater / no supplier or entitlement issuer — kept for get() identity but NOT buyable.
+  { id: 'carbon-credits-trading', name: 'Carbon Credits Trading', priceUsd: 500, billing: 'monthly', category: 'carbon', buyable: false, fulfillable: false, fulfillment: null, blockReason: 'no_supplier_or_entitlement' },
+  { id: 'quantum-identity-shield', name: 'Quantum Identity Shield', priceUsd: 79, billing: 'monthly', category: 'security', buyable: false, fulfillable: false, fulfillment: null, blockReason: 'no_supplier_or_entitlement' },
+  { id: 'autonomous-negotiation', name: 'Autonomous Negotiation', priceUsd: 199, billing: 'monthly', category: 'negotiation', buyable: false, fulfillable: false, fulfillment: null, blockReason: 'no_supplier_or_entitlement' },
 ];
 
 function seed() {
   for (const s of SEED) {
+    const buyable = s.buyable !== false && s.fulfillable !== false;
     SKUS.set(s.id, {
       ...s,
       active: true,
+      buyable,
+      fulfillable: buyable,
       currency: 'USD',
       btcAddress: BTC_ADDRESS,
-      buyPath: '/api/orders/reserve',
+      buyPath: buyable ? '/api/orders/reserve' : null,
       updatedAt: new Date().toISOString(),
     });
   }
 }
 seed();
 
-function list({ includeInactive = false } = {}) {
-  return Array.from(SKUS.values()).filter((s) => includeInactive || s.active);
+function list({ includeInactive = false, buyableOnly = false } = {}) {
+  return Array.from(SKUS.values()).filter((s) => {
+    if (!includeInactive && s.active === false) return false;
+    if (buyableOnly && s.buyable === false) return false;
+    return true;
+  });
 }
 
 function get(id) {
@@ -72,16 +81,26 @@ function ensureRevenueSkus() {
 
 function getStatus() {
   const items = list();
-  const mrr = items
+  const buyable = list({ buyableOnly: true });
+  const mrr = buyable
     .filter((s) => s.billing === 'monthly')
     .reduce((a, s) => a + Number(s.priceUsd || 0), 0);
   return {
-    protocol: 'PRODUCT_CATALOG/1.0',
+    protocol: 'PRODUCT_CATALOG/1.1',
     active: true,
     skuCount: items.length,
+    buyableCount: buyable.length,
+    blockedCount: items.length - buyable.length,
     monthlySkuFloorUsd: mrr,
     btcAddress: BTC_ADDRESS,
-    skus: items.map((s) => ({ id: s.id, priceUsd: s.priceUsd, billing: s.billing })),
+    skus: items.map((s) => ({
+      id: s.id,
+      priceUsd: s.priceUsd,
+      billing: s.billing,
+      buyable: s.buyable !== false,
+      fulfillable: s.fulfillable !== false,
+      blockReason: s.blockReason || null,
+    })),
   };
 }
 

@@ -147,6 +147,8 @@ function sense() {
     aacosSkip: null,
     seoPresent: false,
     competitorPresent: false,
+    competitorUseful: false,
+    competitorDataMode: null,
     outboundConfigured: 0,
     socialConfigured: 0,
     sitemapHint: null,
@@ -210,6 +212,14 @@ function sense() {
   try {
     const spy = softRequire('./competitor-spy-agent');
     snap.competitorPresent = !!(spy && typeof spy.getStatus === 'function');
+    if (snap.competitorPresent) {
+      const st = spy.getStatus();
+      snap.competitorDataMode = st && st.dataMode != null ? st.dataMode : null;
+      // Truth fence: presence alone must NOT inflate gravity. Only useful
+      // non-simulated intel (armed feed / operator facts) counts.
+      snap.competitorUseful = !!(st && st.useful === true && st.simulated !== true
+        && st.dataMode && st.dataMode !== 'unarmed' && st.dataMode !== 'simulated');
+    }
   } catch (_) {}
 
   // Public sitemap liveness (site root) — soft probe, never invents URLs list.
@@ -239,7 +249,7 @@ function scoreGravity(snap) {
         (snap.seoPresent ? 30 : 5)
         + (snap.aacosArmed ? 25 : 5)
         + (snap.growthScore != null ? Math.min(35, Number(snap.growthScore) * 0.35) : 10)
-        + (snap.competitorPresent ? 10 : 0)
+        + (snap.competitorUseful ? 10 : 0)
       )),
       note: 'seo+aacos+brain',
     },

@@ -76,23 +76,32 @@ class LivePricingBroker extends EventEmitter {
 
   getSnapshot() { return this._snapshot; }
 
-  /** IAK/mesh contract — never throws. */
+  /** IAK/mesh contract — never throws. Honest health (never fake ok). */
   getStatus() {
     const snap = this._snapshot || {};
     const rate = snap.btcRate && Number(snap.btcRate.rate);
+    const disabled = String(process.env.LIVE_PRICING_DISABLED || '') === '1';
+    const running = !!this._timer;
+    const serviceCount = Array.isArray(snap.services) ? snap.services.length : 0;
+    const itemCount = Array.isArray(snap.items) ? snap.items.length : 0;
+    const hasRate = Number(rate) > 0;
+    const healthy = !disabled && running && (serviceCount > 0 || itemCount > 0);
+    const health = disabled ? 'disabled'
+      : (!running ? 'idle'
+        : (!hasRate && serviceCount === 0 ? 'degraded' : (healthy ? 'ok' : 'degraded')));
     return {
-      ok: true,
+      ok: healthy,
       module: 'live-pricing-broker',
       name: 'Live Pricing Broker',
-      running: !!this._timer,
+      running,
       refreshMs: snap.refreshMs || REFRESH_MS,
-      serviceCount: Array.isArray(snap.services) ? snap.services.length : 0,
-      itemCount: Array.isArray(snap.items) ? snap.items.length : 0,
+      serviceCount,
+      itemCount,
       btcRate: rate || 0,
       btcSource: (snap.btcRate && snap.btcRate.source) || null,
       updatedAt: snap.updatedAt || null,
-      health: 'ok',
-      disabled: String(process.env.LIVE_PRICING_DISABLED || '') === '1',
+      health,
+      disabled,
       timestamp: new Date().toISOString(),
     };
   }

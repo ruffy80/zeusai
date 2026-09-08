@@ -5172,6 +5172,18 @@ try {
   console.warn('[ROCS] load/start failed:', e && e.message);
 }
 
+// MPCT/1.0 — Money-Path Causal Twin (attested commerce phases only; never invents GMV)
+let moneyPathCausalTwin = null;
+try {
+  moneyPathCausalTwin = require('./modules/money-path-causal-twin');
+  if (process.env.NODE_ENV !== 'test' && process.env.MPCT_DISABLED !== '1') {
+    moneyPathCausalTwin.start();
+  }
+  console.log('💠 MPCT/1.0 Money-Path Causal Twin: MOUNTED (attested phases; no invented GMV)');
+} catch (e) {
+  console.warn('[MPCT] load/start failed:', e && e.message);
+}
+
 // AGDE / WGC/1.0 — World Gravity Continuum: bottleneck→dispatch over real growth organs
 let autonomousGlobalDominanceEngine = null;
 try {
@@ -8972,6 +8984,27 @@ app.post('/api/rocs/tick', adminTokenMiddleware, async (req, res) => {
     return res.json(out);
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message, protocol: 'ROCS/1.0' });
+  }
+});
+
+// MPCT/1.0 — Money-Path Causal Twin
+app.get(['/api/mpct/status', '/api/mpct', '/.well-known/mpct.json'], (req, res) => {
+  try {
+    const m = moneyPathCausalTwin || require('./modules/money-path-causal-twin');
+    res.set('Cache-Control', 'public, max-age=10');
+    return res.json(m.discovery());
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'MPCT/1.0' });
+  }
+});
+app.post('/api/mpct/tick', adminTokenMiddleware, (req, res) => {
+  try {
+    const m = moneyPathCausalTwin || require('./modules/money-path-causal-twin');
+    return res.json(m.tick({
+      dryRun: !!(req.body && req.body.dryRun),
+    }));
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message, protocol: 'MPCT/1.0' });
   }
 });
 

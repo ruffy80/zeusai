@@ -74,11 +74,15 @@ check('frontier carbonEstimate works without orderId', () => {
   assert.ok(est.signature);
 });
 
-check('CFO + competitor spy status are honesty-labelled as simulated', () => {
+check('CFO + competitor spy status are honesty-labelled (never invent theater)', () => {
   const cfo = require('../backend/modules/ai-cfo-agent');
   const spy = require('../backend/modules/competitor-spy-agent');
-  assert.strictEqual(cfo.getStatus().simulated, true);
-  assert.strictEqual(spy.getStatus().simulated, true);
+  const cs = cfo.getStatus();
+  const ss = spy.getStatus();
+  assert.strictEqual(cs.simulated, false, 'CFO must not invent simulated revenue');
+  assert.ok(cs.dataMode === 'unarmed' || cs.dataMode === 'live' || cs.dataMode === 'override');
+  assert.strictEqual(ss.simulated, false, 'spy must not invent competitors');
+  assert.ok(ss.dataMode === 'unarmed' || ss.dataMode === 'live_feed_ready' || ss.dataMode === 'operator');
 });
 
 console.log(`✅ zero-defect-surface-os: ${passed} tests passed`);
