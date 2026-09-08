@@ -617,6 +617,7 @@ function footer(route, opts) {
     </div>
     <div><h3 class="footer-col-title">Product</h3><ul>
       <li><a href="/buy" data-link><strong style="color:#f7931a">Buy now</strong></a></li>
+      <li><a href="/origin" data-link><strong style="color:#00ffa3">Origin Gravity</strong></a></li>
       <li><a href="/zacc" data-link><strong style="color:#8a5cff">🛒 Zeus Dropship OS</strong></a></li>
       <li><a href="/social-network" data-link><strong style="color:#7cf7c0">ZeusAI Social</strong></a></li>
       <li><a href="/services" data-link>Marketplace</a></li>
@@ -1272,6 +1273,21 @@ function pageHome() {
 </section>
 
 ${sellSurface.homeBuyStripHtml(_all.length)}
+
+<section id="homeOriginGravity" class="card" style="margin:28px 0 0;padding:22px 24px;background:linear-gradient(135deg,rgba(0,255,163,.10),rgba(138,92,255,.08));border:1px solid rgba(0,255,163,.38)" data-ogp-banner>
+  <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between">
+    <div style="min-width:240px;flex:1">
+      <span class="kicker" style="color:#00ffa3">OGP/1.0 · Origin Gravity</span>
+      <h2 style="margin:8px 0 6px;font-size:clamp(22px,3vw,32px);line-height:1.15">0 paid humans. <span class="grad">Be Origin #1.</span></h2>
+      <p id="ogpBannerCopy" style="margin:0;color:var(--ink-dim);font-size:14.5px;line-height:1.55;max-width:640px">This AI-commerce OS publishes a hash-chained genesis that admits zero customers. The next confirmed payment becomes a Founding Origin Passport — verifiable forever. No fake “trusted by thousands.”</p>
+      <p style="margin:10px 0 0;font-family:var(--mono);font-size:12px;color:var(--ink-dim)">paidHumans <b id="ogpHumans" style="color:#00ffa3">0</b> · next seat <b id="ogpSeat" style="color:#fff">Origin #1</b> · <span id="ogpHash">genesis on /origin</span></p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;min-width:180px">
+      <a class="btn btn-primary" href="/buy" data-link id="ogpBannerCta">Claim Origin #1 →</a>
+      <a class="btn btn-ghost" href="/origin" data-link>Read the public ledger</a>
+    </div>
+  </div>
+</section>
 
 ${merchantStandardSurface.homeStripHtml()}
 
@@ -3729,9 +3745,91 @@ function pageDeepseekCockpit() {
 </section>`;
 }
 
+function pageOrigin(params) {
+  const wantIdx = params && (params.originIndex || params.id)
+    ? String(params.originIndex || params.id).replace(/[^0-9]/g, '').slice(0, 8)
+    : '';
+  let paid = 0;
+  let genesisHash = '';
+  let chainOk = true;
+  let latest = null;
+  let passport = null;
+  try {
+    const ogp = require('../../../backend/modules/origin-gravity-os');
+    const st = ogp.getStatus();
+    paid = Number(st.paidHumans) || 0;
+    genesisHash = st.genesisHash || '';
+    chainOk = !!st.chainOk;
+    latest = st.latest;
+    if (wantIdx) passport = ogp.getPassport(wantIdx);
+  } catch (_) { /* SSR stays honest at zero if module missing */ }
+  const next = paid + 1;
+  const open = paid === 0;
+  const headline = open
+    ? '0 paid humans. Be Origin #1.'
+    : (passport
+      ? ('Origin #' + (passport.originIndex) + ' passport')
+      : ('Origin #' + paid + ' taken. Next open seat: #' + next));
+  const cta = open ? 'Claim Origin #1 →' : ('Claim Origin #' + next + ' →');
+  const hashShort = genesisHash ? (genesisHash.slice(0, 16) + '…') : 'pending';
+  const passHtml = passport ? `<div class="card" style="padding:20px;margin-top:18px;border:1px solid rgba(0,255,163,.35)">
+    <span class="kicker" style="color:#00ffa3">${passport.founding ? 'Founding Origin Passport' : 'Origin Passport'}</span>
+    <h3 style="margin:8px 0 6px">Origin #${_esc(String(passport.originIndex))}</h3>
+    <p style="color:var(--ink-dim);font-size:13.5px;margin:0 0 10px">Hash-chained. Order id is hashed for privacy. This is not a fake NFT and not invented GMV.</p>
+    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.55;margin:0;color:var(--ink)">${_esc(JSON.stringify(passport, null, 2))}</pre>
+  </div>` : (wantIdx ? `<div class="card" style="padding:20px;margin-top:18px"><p style="margin:0;color:var(--ink-dim)">Origin #${_esc(wantIdx)} is not minted yet. paidHumans = ${paid}. The next confirmed settlement becomes Origin #${next}.</p></div>` : '');
+  const latestHtml = latest ? `<div class="card" style="padding:18px;margin-top:14px">
+    <span class="kicker">Ledger tip</span>
+    <p style="margin:8px 0 0;font-family:var(--mono);font-size:12.5px;line-height:1.7">type ${ _esc(String(latest.type || 'genesis')) } · paidHumans ${paid} · hash ${_esc(String(latest.hash || '').slice(0, 20))}…</p>
+  </div>` : '';
+  return `<section class="hero" style="padding-bottom:12px">
+  <div class="hero-copy" style="max-width:820px">
+    <span class="hero-eyebrow"><span class="dot"></span> OGP/1.0 · Origin Gravity Protocol</span>
+    <h1>${_esc(headline.split('.')[0])}. <span class="grad">${open ? 'Be Origin #1.' : _esc(headline.split('.').slice(1).join('.').trim() || 'Hash-chained forever.')}</span></h1>
+    <p class="lead">Every other storefront hides emptiness or invents social proof. ZeusAI publishes a signed genesis that the platform has ${paid} paid human${paid === 1 ? '' : 's'}. AI crawlers and search engines can verify that number at <code>/.well-known/origin-gravity.json</code>.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="/buy" data-link>${_esc(cta)}</a>
+      <a class="btn btn-ghost" href="/services" data-link>Browse live catalog</a>
+    </div>
+  </div>
+</section>
+<section style="margin-top:8px">
+  <div class="grid phone-stack" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+    <div class="card" style="padding:16px"><div style="font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.08em">paidHumans</div><div id="ogpPageHumans" style="font-size:28px;font-weight:800;margin-top:4px">${paid}</div><p style="margin:6px 0 0;color:var(--ink-dim);font-size:13px">Never invented. Unpaid checkouts do not count.</p></div>
+    <div class="card" style="padding:16px"><div style="font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.08em">Next seat</div><div id="ogpPageSeat" style="font-size:28px;font-weight:800;margin-top:4px">#${next}</div><p style="margin:6px 0 0;color:var(--ink-dim);font-size:13px">${open ? 'Founding Origin Passport still unclaimed.' : 'Next confirmed settlement mints the next passport.'}</p></div>
+    <div class="card" style="padding:16px"><div style="font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.08em">Genesis</div><div style="font-size:15px;font-weight:700;margin-top:8px;font-family:var(--mono)">${_esc(hashShort)}</div><p style="margin:6px 0 0;color:var(--ink-dim);font-size:13px">Chain ${chainOk ? 'valid' : 'needs repair'} · inventsHumans: false</p></div>
+  </div>
+  ${passHtml}
+  ${latestHtml}
+  <div class="card" style="padding:20px;margin-top:18px">
+    <span class="kicker">Why this is unique</span>
+    <h2 style="margin:8px 0 8px;font-size:22px">Inverse social proof as a discovery weapon.</h2>
+    <p style="color:var(--ink-dim);font-size:14.5px;line-height:1.6;margin:0 0 10px">Search engines and AI agents rank claims they can verify. ZeusAI is the first AI-commerce OS that signs emptiness, puts it on IndexNow + <code>/llms.txt</code>, and turns the first real buyer into Origin #1. When you pay, you do not join a fake crowd — you open the ledger.</p>
+    <p style="margin:0;font-size:13.5px"><a href="/.well-known/origin-gravity.json" data-allow-raw="1">/.well-known/origin-gravity.json</a> · <a href="/llms.txt" data-allow-raw="1">/llms.txt</a> · <a href="/api/origin-gravity/ledger" data-allow-raw="1">ledger API</a></p>
+  </div>
+</section>
+<script>
+(function(){
+  fetch('/api/origin-gravity',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+    var st = (d && d.status) ? d.status : d;
+    var n = st && typeof st.paidHumans === 'number' ? st.paidHumans : null;
+    if (n == null) return;
+    var h = document.getElementById('ogpPageHumans');
+    if (h) h.textContent = String(n);
+    var s = document.getElementById('ogpPageSeat');
+    if (s) s.textContent = '#' + (n + 1);
+  }).catch(function(){});
+})();
+</script>`;
+}
+
 function renderRoute(route, params = {}) {
+  if (route.startsWith('/origin/')) {
+    return pageOrigin(Object.assign({}, params, { originIndex: route.slice('/origin/'.length) }));
+  }
   switch (route) {
     case '/': return pageHome();
+    case '/origin': return pageOrigin(params);
     case '/buy': return sellSurface.pageBuy();
     case '/outcomes': return sellSurface.pageOutcomes();
     case '/rails': return sellSurface.pageRails();
@@ -5176,6 +5274,21 @@ function pageStatus(params = {}) {
     <p id="cblosDoctrine" style="color:var(--ink-dim);font-size:13.5px;margin:16px 0 0;font-style:italic">Site and Unicorn must sell the same catalog at the same price.</p>
   </div>
 
+  <div class="card" id="ogpPanel" style="margin-top:18px;padding:26px" aria-live="polite">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+      <div>
+        <span class="kicker">Origin Gravity</span>
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:4px">
+          <span id="ogpStatusHumans" class="grad" style="font-size:clamp(36px,5vw,56px);font-weight:800;line-height:1;font-family:var(--mono,monospace)">0</span>
+          <span id="ogpStatusSeat" style="font-size:18px;font-weight:700;letter-spacing:.04em">Origin #1 open</span>
+        </div>
+        <p style="color:var(--ink-dim);font-size:13.5px;margin:10px 0 0">Signed zero-customer genesis · founding passport · never invents humans · <b id="ogpStatusChain" style="color:#fff">—</b></p>
+      </div>
+      <a class="btn" href="/origin" data-link style="margin-top:8px">Open origin ledger →</a>
+    </div>
+    <p id="ogpStatusClaim" style="color:var(--ink-dim);font-size:13.5px;margin:16px 0 0;font-style:italic">paidHumans is the only real number.</p>
+  </div>
+
   <div class="card" id="cicPanel" style="margin-top:18px;padding:26px;border:1px solid rgba(255,159,28,.28)" aria-live="polite">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
       <div>
@@ -5572,7 +5685,25 @@ function pageStatus(params = {}) {
       if(se2) se2.textContent='—';
     }
   }
-  function loadAllStatus(){ loadStatus(); loadAutonomyOs(); loadNeuralOs(); loadSiteBond(); loadTriadBond(); loadCommerceBond(); loadBrandSpectrum(); loadPlatformFoundation(); loadEnterpriseStandard(); }
+  async function loadOriginGravity(){
+    try {
+      var d = await (await fetch('/api/origin-gravity',{cache:'no-store'})).json();
+      var st = (d && d.status) ? d.status : d;
+      var n = st && typeof st.paidHumans === 'number' ? st.paidHumans : 0;
+      var humansEl=document.getElementById('ogpStatusHumans');
+      var seatEl=document.getElementById('ogpStatusSeat');
+      var chainEl=document.getElementById('ogpStatusChain');
+      var claimEl=document.getElementById('ogpStatusClaim');
+      if(humansEl) humansEl.textContent = String(n);
+      if(seatEl) seatEl.textContent = n===0 ? 'Origin #1 open' : ('Next Origin #'+(n+1));
+      if(chainEl) chainEl.textContent = st && st.chainOk ? 'CHAIN OK' : 'CHAIN';
+      if(claimEl && d && d.claim) claimEl.textContent = String(d.claim);
+    } catch(e) {
+      var se=document.getElementById('ogpStatusHumans');
+      if(se && se.textContent==='—') se.textContent='0';
+    }
+  }
+  function loadAllStatus(){ loadStatus(); loadAutonomyOs(); loadNeuralOs(); loadSiteBond(); loadTriadBond(); loadCommerceBond(); loadOriginGravity(); loadBrandSpectrum(); loadPlatformFoundation(); loadEnterpriseStandard(); }
   loadAllStatus(); setInterval(loadAllStatus, 15000);
   </script>
 </section>`;
@@ -6521,6 +6652,7 @@ function _legalSub(title, body) {
 
 function routeTitle(route) {
   if (route === '/') return 'Sovereign AI OS';
+  if (route === '/origin' || route.startsWith('/origin/')) return 'Origin Gravity';
   if (route.startsWith('/services/')) return 'Service';
   if (route.startsWith('/order/')) return 'Order Passport';
   if (route.startsWith('/twin/')) return 'Buyer Twin';
@@ -6531,6 +6663,7 @@ function routeTitle(route) {
 function routeDescription(route) {
   const map = {
     '/': 'ZeusAI is a sovereign autonomous AI operating system with signed outcomes, BTC-native commerce and self-healing automation.',
+    '/origin': 'Origin Gravity Protocol — ZeusAI publishes a hash-chained genesis that it has zero paid humans. Be Origin #1 and receive a Founding Origin Passport.',
     '/buy': 'Buy only ZeusAI products with real fulfillment recipes — BTC self-serve, professional reserves, honest enterprise contact.',
     '/outcomes': 'Verify Proof-of-Outcome escrows, Delivery Passports and Agent Capability Exchange listings on ZeusAI.',
     '/rails': 'Honest Armed Rails Continuum: which payment and notify rails are armed vs idle until you add keys.',

@@ -5197,6 +5197,18 @@ try {
   console.warn('[CBLOS] load/start failed:', e && e.message);
 }
 
+// OGP/1.0 — Origin Gravity Protocol (signed zero-customer genesis; no fake humans)
+let originGravityOs = null;
+try {
+  originGravityOs = require('./modules/origin-gravity-os');
+  if (process.env.NODE_ENV !== 'test' && process.env.OGP_DISABLED !== '1') {
+    originGravityOs.start();
+  }
+  console.log('🌍 OGP/1.0 Origin Gravity: MOUNTED (paidHumans never invented)');
+} catch (e) {
+  console.warn('[OGP] load/start failed:', e && e.message);
+}
+
 function _cblosBtc(rate) {
   try {
     const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
@@ -9130,6 +9142,57 @@ app.get(['/api/cblos/status', '/api/cblos', '/.well-known/commerce-bond.json'], 
   }
 });
 
+app.get(['/api/origin-gravity', '/api/origin-gravity/status', '/.well-known/origin-gravity.json'], (req, res) => {
+  try {
+    const m = originGravityOs || require('./modules/origin-gravity-os');
+    const hdr = m.originHeaders();
+    Object.keys(hdr).forEach((k) => res.set(k, hdr[k]));
+    res.set('Cache-Control', 'public, max-age=8');
+    return res.json(m.discovery());
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0', inventsHumans: false });
+  }
+});
+app.get('/api/origin-gravity/ledger', (req, res) => {
+  try {
+    const m = originGravityOs || require('./modules/origin-gravity-os');
+    const hdr = m.originHeaders();
+    Object.keys(hdr).forEach((k) => res.set(k, hdr[k]));
+    res.set('Cache-Control', 'public, max-age=8');
+    return res.json({ ok: true, protocol: 'OGP/1.0', inventsHumans: false, ...m.publicLedger(req.query.limit) });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
+  }
+});
+app.get('/api/origin-gravity/passport/:n', (req, res) => {
+  try {
+    const m = originGravityOs || require('./modules/origin-gravity-os');
+    const pass = m.getPassport(req.params.n);
+    if (!pass) return res.status(404).json({ ok: false, protocol: 'OGP/1.0', error: 'passport_not_minted', inventsHumans: false });
+    return res.json({ ok: true, protocol: 'OGP/1.0', inventsHumans: false, passport: pass });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
+  }
+});
+app.post('/api/origin-gravity/invite/redeem', (req, res) => {
+  try {
+    const m = originGravityOs || require('./modules/origin-gravity-os');
+    return res.json(m.redeemInvite(req.body && (req.body.code || req.body.invite)));
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
+  }
+});
+app.post('/api/origin-gravity/pulse', adminTokenMiddleware, (req, res) => {
+  try {
+    const m = originGravityOs || require('./modules/origin-gravity-os');
+    return Promise.resolve(m.pulseDiscovery({
+      dryRun: !!(req.body && req.body.dryRun),
+    })).then((out) => res.json(out));
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
+  }
+});
+
 app.get(['/api/billion-scale/post-pay', '/api/post-pay/status'], (req, res) => {
   try {
     const ppcos = require('../src/commerce/post-pay-closure-os');
@@ -9390,6 +9453,17 @@ function _onPaidInvoice(invoice) {
   } catch (e) { console.warn('[BTC/Paid] sale notification failed:', e.message); }
   // Mesh broadcast so other modules can react (e.g., service activation).
   try { meshOrchestrator.broadcast && meshOrchestrator.broadcast('btc.invoice.paid', invoice); } catch (e) { console.warn('[BTC/Paid] mesh broadcast failed:', e.message); }
+  try {
+    const ogp = originGravityOs || require('./modules/origin-gravity-os');
+    ogp.recordPaidHuman({
+      orderId: invoice && (invoice.orderId || invoice.id),
+      id: invoice && invoice.id,
+      status: 'paid',
+      serviceId: invoice && (invoice.serviceId || invoice.service || invoice.plan),
+      rail: (invoice && (invoice.rail || invoice.method || invoice.provider)) || 'btc',
+      paidAt: invoice && (invoice.paidAt || invoice.paid_at),
+    });
+  } catch (e) { console.warn('[OGP] paid human record failed:', e && e.message); }
 }
 
 // Unified settle tail for Stripe / PayPal / NOWPayments confirmations.

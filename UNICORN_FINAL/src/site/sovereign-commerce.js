@@ -85,6 +85,19 @@ function setDeliveryHook(fn) {
 }
 function _fireDelivery(order) {
   if (!order) return;
+  try {
+    const ogp = require('../../backend/modules/origin-gravity-os');
+    ogp.recordPaidHuman({
+      orderId: order.orderId,
+      id: order.orderId,
+      status: 'paid',
+      serviceId: order.serviceId || order.plan,
+      rail: order.paid_via || order.paidVia || 'btc',
+      paidAt: order.paid_at,
+    });
+  } catch (e) {
+    console.warn('[commerce] origin gravity paid:', e && e.message);
+  }
   // World-Standard settle bridge (PoOP escrow + CTP twin) — before pack delivery
   try {
     const wsiBridge = require('../commerce/wsi-settle-bridge');

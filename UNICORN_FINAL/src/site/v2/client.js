@@ -2060,8 +2060,33 @@ async function hydrateHome(){
   hydrateAutonomyScore().catch(function(){});
   hydrateCommerceProof();
   hydrateHomeProof().catch(function(){});
+  hydrateOriginGravity().catch(function(){});
   bindHeroQuickBuy();
   initFinalLive(services);
+}
+
+async function hydrateOriginGravity(){
+  const humans = document.getElementById('ogpHumans');
+  const seat = document.getElementById('ogpSeat');
+  const hashEl = document.getElementById('ogpHash');
+  const copy = document.getElementById('ogpBannerCopy');
+  const cta = document.getElementById('ogpBannerCta');
+  if (!humans && !seat && !copy) return;
+  try {
+    const r = await api('/api/origin-gravity');
+    const st = (r && r.status) ? r.status : r;
+    if (!st) return;
+    const n = typeof st.paidHumans === 'number' ? st.paidHumans : 0;
+    if (humans) humans.textContent = String(n);
+    if (seat) seat.textContent = n === 0 ? 'Origin #1' : ('Origin #' + (n + 1));
+    if (hashEl && st.genesisHash) hashEl.textContent = 'genesis ' + String(st.genesisHash).slice(0, 12) + '…';
+    if (copy) {
+      copy.textContent = n === 0
+        ? 'This AI-commerce OS publishes a hash-chained genesis that admits zero customers. The next confirmed payment becomes a Founding Origin Passport — verifiable forever. No fake “trusted by thousands.”'
+        : ('Origin #' + n + ' is on the public ledger. The next confirmed settlement becomes Origin #' + (n + 1) + '. Traction is never invented.');
+    }
+    if (cta) cta.textContent = n === 0 ? 'Claim Origin #1 →' : ('Claim Origin #' + (n + 1) + ' →');
+  } catch (_) { /* keep SSR zero-human copy */ }
 }
 
 // World-Profit-OS: paint SSR `#homeLiveSales` with real recent on-chain sales
