@@ -235,7 +235,7 @@ app.get('/health', (req, res) => {
   } catch (_) { /* cache not ready */ }
   const backendOk = !!mon.ok;
   res.json({
-    ok: true,
+    ok: backendOk,
     status: backendOk ? 'healthy' : 'degraded',
     degraded: !backendOk,
     service: 'unicorn-final',
@@ -287,6 +287,22 @@ app.get('/health', (req, res) => {
         };
       } catch (_) {
         return { protocol: 'TBOS/1.0', available: false };
+      }
+    })(),
+    commerceBond: (function () {
+      try {
+        const cblos = require('../backend/modules/commerce-bond-loop-os');
+        const s = cblos.getScore();
+        return {
+          protocol: 'CBLOS/1.0',
+          available: true,
+          score: s.score,
+          grade: s.grade,
+          bonded: !!s.bonded,
+          inventsGmv: false,
+        };
+      } catch (_) {
+        return { protocol: 'CBLOS/1.0', available: false };
       }
     })(),
     brandSpectrum: (function () {
@@ -920,6 +936,16 @@ app.get('/api/autonomy/bond/score', siteProxyToUnicorn('/api/autonomy/bond/score
 app.get('/.well-known/triad-bond.json', siteProxyToUnicorn('/api/autonomy/triad'));
 app.get('/api/autonomy/triad', siteProxyToUnicorn('/api/autonomy/triad'));
 app.get('/api/autonomy/triad/score', siteProxyToUnicorn('/api/autonomy/triad/score'));
+// CBLOS/1.0 — Commerce Bond Loop (local so catalog/quote truth stays up if backend is dark)
+app.get(['/.well-known/commerce-bond.json', '/api/cblos', '/api/cblos/status'], (req, res) => {
+  try {
+    const cblos = require('../backend/modules/commerce-bond-loop-os');
+    res.set('Cache-Control', 'no-store');
+    return res.json(cblos.discovery());
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'CBLOS/1.0' });
+  }
+});
 // CIC/1.0 — serve locally first so brand continuum stays up even if backend is dark/old.
 app.get(['/api/brand/spectrum', '/.well-known/brand-spectrum.json'], (req, res) => {
   try {
@@ -4000,6 +4026,7 @@ function proxyToBackend(req, res, backendBaseUrl) {
       path: target.pathname + (target.search || ''),
       method: req.method,
       headers: proxyHeaders,
+      timeout: Math.max(3000, Number(process.env.SITE_PROXY_TIMEOUT_MS || 8000)),
     };
     const proxyReq = lib.request(options, (proxyRes) => {
       const safeHeaders = {};
@@ -4008,6 +4035,13 @@ function proxyToBackend(req, res, backendBaseUrl) {
       });
       res.writeHead(proxyRes.statusCode, safeHeaders);
       proxyRes.pipe(res, { end: true });
+    });
+    proxyReq.on('timeout', () => {
+      try { proxyReq.destroy(); } catch (_) {}
+      if (!res.headersSent) {
+        res.writeHead(504, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Backend proxy timeout' }));
+      }
     });
     proxyReq.on('error', (err) => {
       if (!res.headersSent) {
@@ -5363,7 +5397,9 @@ async function unicornHandler(req, res) {
                   unicorn:  (typeof unicornEventClients !== 'undefined' && unicornEventClients && unicornEventClients.size) || 0 };
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({
-      ok: true, service: 'unicorn-final', brand: 'ZeusAI',
+      ok: !!__mon.ok, service: 'unicorn-final', brand: 'ZeusAI',
+      status: __mon.ok ? 'healthy' : 'degraded',
+      degraded: !__mon.ok,
       uptimeSec: Math.round(process.uptime()),
       backend: { ok: __mon.ok, fails: __mon.fails || 0, lastCheckTs: __mon.lastTs || 0 },
       sse: __sse,
@@ -7639,6 +7675,8 @@ seedSsrMap();if(document.getElementById("ds-sort")&&!document.getElementById("ds
         bond_score:        '/api/autonomy/bond/score',
         triad_bond:        '/.well-known/triad-bond.json',
         triad_score:       '/api/autonomy/triad/score',
+        commerce_bond:     '/.well-known/commerce-bond.json',
+        cblos:             '/api/cblos',
         brand_spectrum:    '/.well-known/brand-spectrum.json',
         brand_spectrum_score: '/api/brand/spectrum/score',
         world_dropship:    '/.well-known/world-dropship.json',
@@ -7951,6 +7989,13 @@ seedSsrMap();if(document.getElementById("ds-sort")&&!document.getElementById("ds
           buyUrl: '/checkout?serviceId=' + encodeURIComponent(id) + '&plan=' + encodeURIComponent(id)
         });
       }
+      try {
+        const cblos = require('../backend/modules/commerce-bond-loop-os');
+        cblos.recordBeat('catalog_snapshot', {
+          peer: 'site',
+          catalogHash: cblos.hashCatalog(items),
+        });
+      } catch (_) { /* observe-only */ }
       res.writeHead(200, { 'Content-Type':'application/json', 'Cache-Control':'public, max-age=30' });
       return res.end(JSON.stringify(items));
     } catch (e) {
@@ -8089,6 +8134,22 @@ seedSsrMap();if(document.getElementById("ds-sort")&&!document.getElementById("ds
     } catch (e) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: false, error: e.message, protocol: 'TBOS/1.0' }));
+    }
+  }
+
+  // CBLOS/1.0 — Commerce Bond Loop (site↔backend catalog/quote/rate truth)
+  if (
+    urlPath === '/.well-known/commerce-bond.json'
+    || urlPath === '/api/cblos'
+    || urlPath === '/api/cblos/status'
+  ) {
+    try {
+      const cblos = require('../backend/modules/commerce-bond-loop-os');
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(cblos.discovery()));
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: e.message, protocol: 'CBLOS/1.0' }));
     }
   }
 
@@ -8918,6 +8979,12 @@ setInterval(function(){loadOrder().then(render);},10000);
   if (urlPath === '/api/btc/spot' || urlPath === '/api/btc/rate' || urlPath === '/api/payment/btc-rate') {
     try {
       const usdPerBtc = await getBtcUsdSpot();
+      try {
+        const cblos = require('../backend/modules/commerce-bond-loop-os');
+        if (Number.isFinite(usdPerBtc) && usdPerBtc > 0) {
+          cblos.recordBeat('btc_rate', { peer: 'site', btcRateUsd: usdPerBtc });
+        }
+      } catch (_) { /* observe-only */ }
       res.writeHead(200, { 'Content-Type':'application/json', 'Cache-Control':'public, max-age=60' });
       return res.end(JSON.stringify({ usdPerBtc, rate: usdPerBtc, usd: usdPerBtc, fetchedAt: new Date(_btcSpotCache.fetchedAt).toISOString(), btcAddress: BTC_WALLET, owner: OWNER_NAME }));
     } catch (e) {
@@ -12468,7 +12535,7 @@ if (require.main === module) {
       if (process.env.UNICORN_BACKEND_MONITOR_DISABLED === '1') return;
       var monitor = { fails: 0, ok: true, lastTs: 0, target: null, lastCode: null, lastBodyOk: null, reason: null };
       global.__UNICORN_BACKEND_MONITOR = monitor;
-      var BACKEND_URL = process.env.UNICORN_SITE_INTERNAL_BACKEND || 'http://127.0.0.1:3000/api/health';
+      var BACKEND_URL = process.env.UNICORN_SITE_INTERNAL_BACKEND || 'http://127.0.0.1:3000/api/health/live';
       monitor.target = BACKEND_URL;
       var http2 = require('http');
       var MONITOR_TIMEOUT_MS = Math.max(3000, Number(process.env.UNICORN_BACKEND_MONITOR_TIMEOUT_MS || 8000));

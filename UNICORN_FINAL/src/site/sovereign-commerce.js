@@ -785,7 +785,7 @@ function _fireFunnel(event, extra) {
 async function createOrder(ctx, input) {
   const { qty = 1, currency = 'USD', preorder = false } = input || {};
   // Sanitize serviceId to a safe id charset before any resolution/allocation.
-  const serviceId = String((input && input.serviceId) || '').trim().slice(0, 128).replace(/[^\w.:-]/g, '');
+  const serviceId = String((input && (input.serviceId || input.plan || input.service_id)) || '').trim().slice(0, 128).replace(/[^\w.:-]/g, '');
   if (!serviceId) return { error: 'serviceId_required', status: 400 };
 
   // Immortality Continuum — Commerce Pressure Gate (fail-closed under disk/RAM critical)
@@ -995,6 +995,15 @@ async function createOrder(ctx, input) {
     }
   } catch (_) { /* ignore */ }
   persistOrder(order);
+  try {
+    const cblos = require('../../backend/modules/commerce-bond-loop-os');
+    cblos.recordBeat('checkout_create', {
+      peer: 'site',
+      serviceId,
+      priceUsd: subtotalFiat,
+      orderId,
+    });
+  } catch (_) { /* observe-only */ }
   // Canonical Settle Bridge — dual-write portal shadow off the create critical path.
   const orderForBridge = order;
   setImmediate(function () {

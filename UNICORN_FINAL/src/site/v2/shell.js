@@ -5160,6 +5160,22 @@ function pageStatus(params = {}) {
     <p id="tbosDoctrine" style="color:var(--ink-dim);font-size:13.5px;margin:16px 0 0;font-style:italic">—</p>
   </div>
 
+  <div class="card" id="cblosPanel" style="margin-top:18px;padding:26px" aria-live="polite">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+      <div>
+        <span class="kicker">Commerce Bond Loop</span>
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:4px">
+          <span id="cblosScore" class="grad" style="font-size:clamp(36px,5vw,56px);font-weight:800;line-height:1;font-family:var(--mono,monospace)">—</span>
+          <span id="cblosGrade" style="font-size:18px;font-weight:700;letter-spacing:.04em">—</span>
+        </div>
+        <p style="color:var(--ink-dim);font-size:13.5px;margin:10px 0 0">Catalog · quote · BTC rate · funnel · never invents GMV · <b id="cblosBonded" style="color:#fff">—</b></p>
+      </div>
+      <button type="button" class="btn" data-live-inspect="/api/cblos" data-live-title="Commerce bond live →" style="margin-top:8px">Commerce bond live →</button>
+    </div>
+    <div id="cblosParts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:18px"></div>
+    <p id="cblosDoctrine" style="color:var(--ink-dim);font-size:13.5px;margin:16px 0 0;font-style:italic">Site and Unicorn must sell the same catalog at the same price.</p>
+  </div>
+
   <div class="card" id="cicPanel" style="margin-top:18px;padding:26px;border:1px solid rgba(255,159,28,.28)" aria-live="polite">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
       <div>
@@ -5488,6 +5504,36 @@ function pageStatus(params = {}) {
       if(pe) pe.innerHTML='<p style="color:var(--ink-dim);font-size:13.5px;margin:0">Triad snapshot unavailable.</p>';
     }
   }
+  async function loadCommerceBond(){
+    try {
+      var d = await (await fetch('/api/cblos',{cache:'no-store'})).json();
+      var st = (d && d.status) ? d.status : d;
+      var scoreEl=document.getElementById('cblosScore');
+      var gradeEl=document.getElementById('cblosGrade');
+      var bondedEl=document.getElementById('cblosBonded');
+      var partsEl=document.getElementById('cblosParts');
+      if(scoreEl) scoreEl.textContent = st && st.score!=null ? String(st.score) : '—';
+      if(gradeEl) gradeEl.textContent = st && st.grade!=null ? String(st.grade) : '—';
+      if(bondedEl) bondedEl.textContent = st && st.bonded ? 'ALIGNED' : 'DRIFT';
+      var parts = (st && st.parts) || {};
+      if(partsEl){
+        var keys = [['catalog','Catalog'],['quote','Quote'],['btc','BTC rate'],['funnel','Funnel']];
+        partsEl.innerHTML = keys.map(function(row){
+          var k=row[0], label=row[1];
+          var v=Number(parts[k]);
+          var ok = (k==='catalog' && v>=40) || (k==='quote' && v>=30) || (k==='btc' && v>=20) || (k==='funnel' && v>=10);
+          var bg=ok?'rgba(59,255,176,.15)':'rgba(255,200,80,.12)';
+          var fg=ok?'#3bffb0':'#ffd27a';
+          return '<div style="padding:12px 14px;border-radius:12px;border:1px solid var(--stroke,rgba(160,200,255,.14));background:rgba(0,0,0,.22)"><span class="tag" style="background:'+bg+';color:'+fg+';margin-bottom:8px">'+(Number.isFinite(v)?v:'—')+'</span><div style="font-size:14px;font-weight:600">'+label+'</div></div>';
+        }).join('');
+      }
+    } catch(e) {
+      var se=document.getElementById('cblosScore');
+      var pe=document.getElementById('cblosParts');
+      if(se) se.textContent='—';
+      if(pe) pe.innerHTML='<p style="color:var(--ink-dim);font-size:13.5px;margin:0">Commerce bond snapshot unavailable.</p>';
+    }
+  }
   async function loadBrandSpectrum(){
     try {
       var d = await (await fetch('/api/brand/spectrum',{cache:'no-store'})).json();
@@ -5526,7 +5572,7 @@ function pageStatus(params = {}) {
       if(se2) se2.textContent='—';
     }
   }
-  function loadAllStatus(){ loadStatus(); loadAutonomyOs(); loadNeuralOs(); loadSiteBond(); loadTriadBond(); loadBrandSpectrum(); loadPlatformFoundation(); loadEnterpriseStandard(); }
+  function loadAllStatus(){ loadStatus(); loadAutonomyOs(); loadNeuralOs(); loadSiteBond(); loadTriadBond(); loadCommerceBond(); loadBrandSpectrum(); loadPlatformFoundation(); loadEnterpriseStandard(); }
   loadAllStatus(); setInterval(loadAllStatus, 15000);
   </script>
 </section>`;

@@ -72,6 +72,7 @@ UNICORN_FINAL/data/wacp/
 UNICORN_FINAL/data/innovations/shipped/
 UNICORN_FINAL/data/notifications.jsonl
 UNICORN_FINAL/data/zacc-state.json
+UNICORN_FINAL/data/cblos/
 
 # --- Secrets / private keys / DB snapshots committed by accident (scrubbed) ---
 # NOTE: these were previously committed; untracking + ignoring stops further

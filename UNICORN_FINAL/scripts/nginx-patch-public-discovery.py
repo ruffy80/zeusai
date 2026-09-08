@@ -118,6 +118,15 @@ location = /.well-known/triad-bond.json {
     proxy_set_header X-Forwarded-Proto $scheme;
     add_header Cache-Control "no-store" always;
 }
+location = /.well-known/commerce-bond.json {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    add_header Cache-Control "no-store" always;
+}
 location = /.well-known/brand-spectrum.json {
     proxy_pass http://127.0.0.1:3000;
     proxy_http_version 1.1;
@@ -284,6 +293,22 @@ _REQUIRED_LOCATIONS = [
             "\n"
             "# ── /.well-known/triad-bond.json — TBOS/1.0 (self-heal) ──\n"
             "location = /.well-known/triad-bond.json {\n"
+            "    proxy_pass http://127.0.0.1:3000;\n"
+            "    proxy_http_version 1.1;\n"
+            "    proxy_set_header Host $host;\n"
+            "    proxy_set_header X-Real-IP $remote_addr;\n"
+            "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            "    proxy_set_header X-Forwarded-Proto $scheme;\n"
+            "    add_header Cache-Control \"no-store\" always;\n"
+            "}\n"
+        ),
+    },
+    {
+        "match": "location = /.well-known/commerce-bond.json",
+        "block": (
+            "\n"
+            "# ── /.well-known/commerce-bond.json — CBLOS/1.0 (self-heal) ──\n"
+            "location = /.well-known/commerce-bond.json {\n"
             "    proxy_pass http://127.0.0.1:3000;\n"
             "    proxy_http_version 1.1;\n"
             "    proxy_set_header Host $host;\n"

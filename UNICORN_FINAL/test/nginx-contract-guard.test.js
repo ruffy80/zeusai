@@ -82,6 +82,7 @@ const SITE_PINNED = [
   '/api/qr',
   '/api/services',
   '/api/services/list',
+  '/api/catalog',
 ];
 for (const p of SITE_PINNED) {
   check('site-pinned: ' + p + ' → unicorn_site', () => assertSitePinned(p));
@@ -109,6 +110,8 @@ check('site-pinned: /checkout/ passes X-CSP-Nonce and local Cache-Control', () =
 const BACKEND_PINNED = [
   '/.well-known/enterprise.json',
   '/.well-known/platform.json',
+  '/.well-known/commerce-bond.json',
+  '/api/health/live',
 ];
 for (const p of BACKEND_PINNED) {
   check('backend-pinned: ' + p + ' → unicorn_backend', () => assertBackendPinned(p));
