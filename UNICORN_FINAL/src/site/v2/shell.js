@@ -3785,7 +3785,7 @@ function pageOrigin(params) {
   return `<section class="hero" style="padding-bottom:12px">
   <div class="hero-copy" style="max-width:820px">
     <span class="hero-eyebrow"><span class="dot"></span> OGP/1.0 · Origin Gravity Protocol</span>
-    <h1>${_esc(headline.split('.')[0])}. <span class="grad">${open ? 'Be Origin #1.' : _esc(headline.split('.').slice(1).join('.').trim() || 'Hash-chained forever.')}</span></h1>
+    <h1>${open ? '0 paid humans. <span class="grad">Be Origin #1.</span>' : (_esc(String(headline)))}</h1>
     <p class="lead">Every other storefront hides emptiness or invents social proof. ZeusAI publishes a signed genesis that the platform has ${paid} paid human${paid === 1 ? '' : 's'}. AI crawlers and search engines can verify that number at <code>/.well-known/origin-gravity.json</code>.</p>
     <div class="hero-cta">
       <a class="btn btn-primary" href="/buy" data-link>${_esc(cta)}</a>
