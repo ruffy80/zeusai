@@ -127,6 +127,8 @@ const STABLE_START_ALLOW = new Set([
   'checkoutRecoveryAgent',
   'commerce-bond-loop-os',
   'commerceBondLoopOs',
+  'origin-gravity-os',
+  'originGravityOs',
 ]);
 
 /** Commerce / payment — monitor+register only unless configured */

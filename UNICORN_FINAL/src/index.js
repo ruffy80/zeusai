@@ -305,6 +305,23 @@ app.get('/health', (req, res) => {
         return { protocol: 'CBLOS/1.0', available: false };
       }
     })(),
+    originGravity: (function () {
+      try {
+        const ogp = require('../backend/modules/origin-gravity-os');
+        const s = ogp.getStatus();
+        return {
+          protocol: 'OGP/1.0',
+          available: true,
+          paidHumans: s.paidHumans,
+          originOpen: !!s.originOpen,
+          nextOriginIndex: s.nextOriginIndex,
+          inventsHumans: false,
+          chainOk: !!s.chainOk,
+        };
+      } catch (_) {
+        return { protocol: 'OGP/1.0', available: false, inventsHumans: false };
+      }
+    })(),
     brandSpectrum: (function () {
       try {
         const cic = require('../backend/modules/brand-spectrum-os');
@@ -944,6 +961,36 @@ app.get(['/.well-known/commerce-bond.json', '/api/cblos', '/api/cblos/status'], 
     return res.json(cblos.discovery());
   } catch (e) {
     return res.status(503).json({ ok: false, error: e.message, protocol: 'CBLOS/1.0' });
+  }
+});
+app.get(['/.well-known/origin-gravity.json', '/api/origin-gravity', '/api/origin-gravity/status'], (req, res) => {
+  try {
+    const ogp = require('../backend/modules/origin-gravity-os');
+    const hdr = ogp.originHeaders();
+    Object.keys(hdr).forEach((k) => res.set(k, hdr[k]));
+    res.set('Cache-Control', 'no-store');
+    return res.json(ogp.discovery());
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0', inventsHumans: false });
+  }
+});
+app.get('/api/origin-gravity/ledger', (req, res) => {
+  try {
+    const ogp = require('../backend/modules/origin-gravity-os');
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, protocol: 'OGP/1.0', inventsHumans: false, ...ogp.publicLedger(req.query.limit) });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
+  }
+});
+app.get('/api/origin-gravity/passport/:n', (req, res) => {
+  try {
+    const ogp = require('../backend/modules/origin-gravity-os');
+    const pass = ogp.getPassport(req.params.n);
+    if (!pass) return res.status(404).json({ ok: false, protocol: 'OGP/1.0', error: 'passport_not_minted', inventsHumans: false });
+    return res.json({ ok: true, protocol: 'OGP/1.0', inventsHumans: false, passport: pass });
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message, protocol: 'OGP/1.0' });
   }
 });
 // CIC/1.0 — serve locally first so brand continuum stays up even if backend is dark/old.
@@ -7687,6 +7734,9 @@ seedSsrMap();if(document.getElementById("ds-sort")&&!document.getElementById("ds
         triad_score:       '/api/autonomy/triad/score',
         commerce_bond:     '/.well-known/commerce-bond.json',
         cblos:             '/api/cblos',
+        origin_gravity:    '/.well-known/origin-gravity.json',
+        ogp:               '/api/origin-gravity',
+        origin_page:       '/origin',
         brand_spectrum:    '/.well-known/brand-spectrum.json',
         brand_spectrum_score: '/api/brand/spectrum/score',
         world_dropship:    '/.well-known/world-dropship.json',
@@ -8160,6 +8210,25 @@ seedSsrMap();if(document.getElementById("ds-sort")&&!document.getElementById("ds
     } catch (e) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: false, error: e.message, protocol: 'CBLOS/1.0' }));
+    }
+  }
+
+  if (
+    urlPath === '/.well-known/origin-gravity.json'
+    || urlPath === '/api/origin-gravity'
+    || urlPath === '/api/origin-gravity/status'
+  ) {
+    try {
+      const ogp = require('../backend/modules/origin-gravity-os');
+      const hdr = ogp.originHeaders();
+      res.writeHead(200, Object.assign({
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      }, hdr));
+      return res.end(JSON.stringify(ogp.discovery()));
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: e.message, protocol: 'OGP/1.0', inventsHumans: false }));
     }
   }
 
@@ -12095,11 +12164,13 @@ a{color:#8a5cff;text-decoration:none}
     '/standard',
     // Human SEO desk
     '/seo',
+    // Origin Gravity — signed zero-customer genesis + founding passport
+    '/origin',
   ];
   // Normalize trailing slash so '/checkout/' '/pricing/' etc. resolve to the
   // same SSR page instead of falling through to the homepage clone.
   const v2Path = (urlPath.length > 1 && urlPath.endsWith('/')) ? urlPath.replace(/\/+$/, '') : urlPath;
-  const isV2Route = v2Routes.includes(v2Path) || v2Path.startsWith('/services/') || v2Path.startsWith('/solutions/') || v2Path.startsWith('/order/') || v2Path.startsWith('/twin/');
+  const isV2Route = v2Routes.includes(v2Path) || v2Path.startsWith('/services/') || v2Path.startsWith('/solutions/') || v2Path.startsWith('/order/') || v2Path.startsWith('/twin/') || v2Path.startsWith('/origin/');
   if (isV2Route) {
     const route = v2Path;
     // 30Y-LTS: per-request CSP nonce (Nginx forwards X-CSP-Nonce as $request_id;
