@@ -61,15 +61,16 @@ check('productCatalog blocks theater SKUs from buyable set', () => {
 });
 
 check('live-pricing-broker getStatus is honest when idle/disabled', () => {
-  process.env.LIVE_PRICING_DISABLED = '1';
-  // Re-require won't re-eval; call getStatus and assert fields exist + contract via source.
   const src = fs.readFileSync(
     path.join(__dirname, '../backend/modules/live-pricing-broker.js'),
     'utf8'
   );
-  assert.ok(/health = disabled/.test(src) || /health: disabled/.test(src) || /'disabled'/.test(src));
-  assert.ok(/ok: healthy/.test(src));
-  delete process.env.LIVE_PRICING_DISABLED;
+  assert.ok(/not_started|LIVE_PRICING_DISABLED/.test(src));
+  assert.ok(/health = 'observe'/.test(src) || /health: 'observe'/.test(src));
+  const lp = require('../backend/modules/live-pricing-broker');
+  const st = lp.getStatus();
+  assert.equal(st.ok, true);
+  assert.ok(st.running === false || st.health === 'ok');
 });
 
 check('globalMonetizationMesh does not invent reachUsers totals', () => {

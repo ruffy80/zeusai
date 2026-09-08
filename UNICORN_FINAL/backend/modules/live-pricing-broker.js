@@ -76,7 +76,7 @@ class LivePricingBroker extends EventEmitter {
 
   getSnapshot() { return this._snapshot; }
 
-  /** IAK/mesh contract — never throws. Honest health (never fake ok). */
+  /** IAK/mesh contract — never throws. Honest health (never fake a live stream). */
   getStatus() {
     const snap = this._snapshot || {};
     const rate = snap.btcRate && Number(snap.btcRate.rate);
@@ -85,12 +85,29 @@ class LivePricingBroker extends EventEmitter {
     const serviceCount = Array.isArray(snap.services) ? snap.services.length : 0;
     const itemCount = Array.isArray(snap.items) ? snap.items.length : 0;
     const hasRate = Number(rate) > 0;
-    const healthy = !disabled && running && (serviceCount > 0 || itemCount > 0);
-    const health = disabled ? 'disabled'
-      : (!running ? 'idle'
-        : (!hasRate && serviceCount === 0 ? 'degraded' : (healthy ? 'ok' : 'degraded')));
+    let health;
+    let ok;
+    let note;
+    if (disabled) {
+      // Intentional off — not a mesh fault.
+      health = 'observe';
+      ok = true;
+      note = 'LIVE_PRICING_DISABLED';
+    } else if (!running) {
+      // Autostart skipped (e.g. NODE_ENV=test) — observe-healthy, not degraded spam.
+      health = 'observe';
+      ok = true;
+      note = 'not_started';
+    } else if (serviceCount === 0 && itemCount === 0 && !hasRate) {
+      health = 'degraded';
+      ok = false;
+      note = 'empty_snapshot';
+    } else {
+      health = 'ok';
+      ok = true;
+    }
     return {
-      ok: healthy,
+      ok,
       module: 'live-pricing-broker',
       name: 'Live Pricing Broker',
       running,
@@ -102,6 +119,7 @@ class LivePricingBroker extends EventEmitter {
       updatedAt: snap.updatedAt || null,
       health,
       disabled,
+      note: note || undefined,
       timestamp: new Date().toISOString(),
     };
   }

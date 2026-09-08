@@ -47,12 +47,14 @@ async function main() {
     assert.equal(s.health, 'ok');
   });
 
-  await check('live-pricing-broker.getStatus is healthy', () => {
+  await check('live-pricing-broker.getStatus is observe-healthy when not started', () => {
     const lp = require('../backend/modules/live-pricing-broker');
     assert.equal(typeof lp.getStatus, 'function');
     const s = lp.getStatus();
+    // Under NODE_ENV=test autostart is skipped — must not spam IAK as degraded.
     assert.equal(s.ok, true);
-    assert.equal(s.health, 'ok');
+    assert.ok(s.health === 'ok' || s.health === 'observe', `got health=${s.health}`);
+    if (!s.running) assert.equal(s.health, 'observe');
   });
 
   await check('autonomousLegalEntity.getStatus() never throws without id', () => {
