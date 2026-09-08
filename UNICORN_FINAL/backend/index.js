@@ -5197,6 +5197,23 @@ try {
   console.warn('[CBLOS] load/start failed:', e && e.message);
 }
 
+function _cblosBtc(rate) {
+  try {
+    const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+    const n = Number(rate && (rate.rate || rate.usdPerBtc || rate.usd));
+    if (Number.isFinite(n) && n > 0) cblos.recordBeat('btc_rate', { peer: 'unicorn', btcRateUsd: n });
+  } catch (_) { /* observe-only */ }
+}
+function _cblosQuote(serviceId, priceUsd) {
+  try {
+    const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
+    const n = Number(priceUsd);
+    if (serviceId && Number.isFinite(n)) {
+      cblos.recordBeat('quote', { peer: 'unicorn', serviceId: String(serviceId), priceUsd: n });
+    }
+  } catch (_) { /* observe-only */ }
+}
+
 // AGDE / WGC/1.0 — World Gravity Continuum: bottleneck→dispatch over real growth organs
 let autonomousGlobalDominanceEngine = null;
 try {
@@ -10361,6 +10378,7 @@ app.get('/api/pricing/:serviceId', async (req, res) => {
   }
   const priceUsd = Number(dp.finalPrice || 0);
   const priceBtc = btcRate > 0 ? Math.round((priceUsd / btcRate) * 1e8) / 1e8 : null;
+  _cblosQuote(serviceId, priceUsd);
   res.set('Cache-Control', 'no-store');
   res.json({
     serviceId,
@@ -10740,13 +10758,7 @@ app.get('/api/payments/config/status', (req, res) => {
 app.get('/api/payment/btc-rate', async (req, res) => {
   try {
     const rate = await paymentGateway.getBitcoinRate();
-    try {
-      const cblos = commerceBondLoopOs || require('./modules/commerce-bond-loop-os');
-      const n = Number(rate && (rate.rate || rate.usdPerBtc || rate.usd));
-      if (Number.isFinite(n) && n > 0) {
-        cblos.recordBeat('btc_rate', { peer: 'unicorn', btcRateUsd: n });
-      }
-    } catch (_) { /* observe-only */ }
+    _cblosBtc(rate);
     res.json(rate);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -10757,7 +10769,9 @@ app.get('/api/payment/btc-rate', async (req, res) => {
 // Returns the same payload as /api/payment/btc-rate.
 app.get('/api/btc/rate', async (req, res) => {
   try {
-    res.json(await paymentGateway.getBitcoinRate());
+    const rate = await paymentGateway.getBitcoinRate();
+    _cblosBtc(rate);
+    res.json(rate);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -10774,6 +10788,7 @@ app.get('/api/btc/spot', async (req, res) => {
   try {
     const r = await paymentGateway.getBitcoinRate();
     const usdPerBtc = Number(r && r.rate) || 0;
+    _cblosBtc(r || { rate: usdPerBtc });
     res.set('Cache-Control', 'public, max-age=60');
     res.json({
       usdPerBtc,

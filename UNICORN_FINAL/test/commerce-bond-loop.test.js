@@ -57,6 +57,12 @@ check('hashCatalog is order-invariant', () => {
   assert.strictEqual(a.length, 24);
 });
 
+check('hashCatalog includes price so SKU price drift is visible', () => {
+  const cheap = cblos.hashCatalog([{ id: 'starter', priceUsd: 19 }]);
+  const dear = cblos.hashCatalog([{ id: 'starter', priceUsd: 49 }]);
+  assert.notStrictEqual(cheap, dear);
+});
+
 check('matching catalog hashes score 40 catalog points', () => {
   cblos._resetForTests();
   const h = cblos.hashCatalog([{ id: 'starter' }, { id: 'pro' }]);
@@ -76,12 +82,23 @@ check('split catalog hashes do not claim full catalog bond', () => {
   assert.strictEqual(sc.inventsGmv, false);
 });
 
-check('checkout + matching quote + BTC ±1% + catalog → 100 bonded', () => {
+check('checkout_create alone does not award full quote points', () => {
   cblos._resetForTests();
-  const h = cblos.hashCatalog([{ id: 'starter' }]);
+  cblos.recordBeat('checkout_create', { peer: 'site', serviceId: 'starter', priceUsd: 49, orderId: 'ord_x' });
+  const sc = cblos.getScore();
+  assert.ok(sc.parts.quote < 30, 'quote must not self-compare checkout');
+  assert.strictEqual(sc.parts.funnel, 10);
+  assert.strictEqual(sc.inventsGmv, false);
+});
+
+check('dual-peer quotes + catalog + BTC + checkout → 100 bonded', () => {
+  cblos._resetForTests();
+  const h = cblos.hashCatalog([{ id: 'starter', priceUsd: 19.98 }]);
   cblos.recordBeat('catalog_snapshot', { peer: 'site', catalogHash: h });
   cblos.recordBeat('catalog_snapshot', { peer: 'unicorn', catalogHash: h });
-  cblos.recordBeat('checkout_create', { peer: 'site', serviceId: 'starter', priceUsd: 49, orderId: 'ord_test' });
+  cblos.recordBeat('quote', { peer: 'site', serviceId: 'starter', priceUsd: 19.98 });
+  cblos.recordBeat('quote', { peer: 'unicorn', serviceId: 'starter', priceUsd: 19.98 });
+  cblos.recordBeat('checkout_create', { peer: 'site', serviceId: 'starter', priceUsd: 19.98, orderId: 'ord_test' });
   cblos.recordBeat('btc_rate', { peer: 'site', btcRateUsd: 100000 });
   cblos.recordBeat('btc_rate', { peer: 'unicorn', btcRateUsd: 100500 });
   const sc = cblos.getScore();
@@ -163,11 +180,38 @@ check('ecosystem default monitor URL is /api/health/live', () => {
   assert.ok(src.includes('/api/health/live'));
 });
 
-check('status page renders Commerce Bond Loop panel', () => {
-  const src = fs.readFileSync(SHELL, 'utf8');
-  assert.ok(src.includes('cblosPanel'));
-  assert.ok(src.includes('loadCommerceBond'));
-  assert.ok(src.includes('/api/cblos'));
+check('backend records BTC beats on all public aliases + quotes on /api/pricing', () => {
+  const src = fs.readFileSync(BACKEND_INDEX, 'utf8');
+  assert.ok(src.includes('_cblosBtc'));
+  assert.ok(src.includes('_cblosQuote'));
+  assert.ok(/app\.get\('\/api\/btc\/rate'/.test(src));
+  assert.ok(/app\.get\('\/api\/btc\/spot'/.test(src));
+});
+
+check('CBLOS start samples both loopback peers (tickSense)', () => {
+  const src = fs.readFileSync(MOD, 'utf8');
+  assert.ok(src.includes('tickSense'));
+  assert.ok(src.includes('cblos-sense/1.0'));
+  assert.ok(src.includes('/api/pricing/'));
+  assert.ok(typeof cblos.tickSense === 'function');
+});
+
+check('beats.jsonl rotates to MAX_BEATS', () => {
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cblos-'));
+  const r = spawnSync(process.execPath, ['-e', `
+    process.env.NODE_ENV = 'test';
+    process.env.CBLOS_DATA_DIR = ${JSON.stringify(dir)};
+    const c = require(${JSON.stringify(MOD)});
+    for (let i = 0; i < 250; i++) c.recordBeat('catalog_snapshot', { peer: 'site', catalogHash: String(i) });
+    const fs = require('fs');
+    const p = require('path').join(${JSON.stringify(dir)}, 'beats.jsonl');
+    const n = fs.readFileSync(p, 'utf8').trim().split('\\n').filter(Boolean).length;
+    if (n > 200) { console.error('lines=' + n); process.exit(2); }
+    process.exit(0);
+  `], { encoding: 'utf8', timeout: 15000 });
+  assert.strictEqual(r.status, 0, (r.stderr || r.stdout || '').slice(0, 400));
 });
 
 console.log(`\n✅ commerce-bond-loop: ${passed} tests passed\n`);

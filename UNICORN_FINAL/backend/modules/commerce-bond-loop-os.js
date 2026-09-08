@@ -3,16 +3,17 @@
  * CBLOS/1.0 — Commerce Bond Loop OS
  * Site↔backend profit-path alignment without inventing GMV.
  *
- * Two processes (unicorn-site + unicorn-backend) share beats via
- * data/cblos/beats.jsonl (production: the shared data symlink). Score
- * hydrates from disk so neither peer can look green while the other
- * is serving a different catalog, quote, or BTC rate.
+ * Two processes share beats via data/cblos/beats.jsonl (capped + rotated).
+ * Score hydrates from disk only when the file mtime changes.
  *
  * Score (0–100):
- *   40 catalog hash match   30 last quote/checkout USD agree
- *   20 BTC rate within 1%   10 checkout funnel continuity
+ *   40 catalog id+price hash match (site vs unicorn)
+ *   30 last quote USD agree (site vs unicorn — never self-compare checkout)
+ *   20 BTC rate within 1%
+ *   10 checkout funnel continuity
  *
- * Observe-only under stable. Never mutates source files. Never invents paid orders.
+ * Production nginx pins catalog→site and /api/* BTC→backend, so start()
+ * samples both loopback peers. Observe-only. Never invents paid orders.
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -30,6 +31,9 @@ const _state = {
   beats: [],
   lastScore: null,
   _timer: null,
+  _senseTimer: null,
+  _sensing: false,
+  _fileMtimeMs: 0,
 };
 
 function _persistEnabled() {
@@ -40,26 +44,46 @@ function _ensureDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) { /* ignore */ }
 }
 
+function _rotateFile(beats) {
+  const keep = (Array.isArray(beats) ? beats : []).slice(-MAX_BEATS);
+  _ensureDir();
+  const tmp = BEATS_FILE + '.tmp';
+  const body = keep.length ? keep.map((b) => JSON.stringify(b)).join('\n') + '\n' : '';
+  fs.writeFileSync(tmp, body);
+  fs.renameSync(tmp, BEATS_FILE);
+  try { _state._fileMtimeMs = fs.statSync(BEATS_FILE).mtimeMs; } catch (_) { _state._fileMtimeMs = Date.now(); }
+}
+
 function _hydrate() {
   if (!_persistEnabled()) return;
   try {
     if (!fs.existsSync(BEATS_FILE)) return;
+    const st = fs.statSync(BEATS_FILE);
+    if (st.mtimeMs === _state._fileMtimeMs && _state.beats.length) return;
     const raw = fs.readFileSync(BEATS_FILE, 'utf8');
     const loaded = [];
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try { loaded.push(JSON.parse(line)); } catch (_) { /* skip bad line */ }
     }
-    if (loaded.length) _state.beats = loaded.slice(-MAX_BEATS);
+    _state.beats = loaded.slice(-MAX_BEATS);
+    _state._fileMtimeMs = st.mtimeMs;
+    if (loaded.length > MAX_BEATS) _rotateFile(_state.beats);
   } catch (_) { /* keep in-memory */ }
 }
 
 function hashCatalog(items) {
-  const ids = (Array.isArray(items) ? items : [])
-    .map((it) => String(it && (it.id || it.serviceId) || ''))
+  const rows = (Array.isArray(items) ? items : [])
+    .map((it) => {
+      const id = String(it && (it.id || it.serviceId) || '');
+      if (!id) return '';
+      const p = Number(it.priceUsd != null ? it.priceUsd : it.price);
+      const cents = Number.isFinite(p) ? Math.round(p * 100) : 0;
+      return id + ':' + cents;
+    })
     .filter(Boolean)
     .sort();
-  return crypto.createHash('sha256').update(ids.join('|')).digest('hex').slice(0, 24);
+  return crypto.createHash('sha256').update(rows.join('|')).digest('hex').slice(0, 24);
 }
 
 function recordBeat(kind, payload = {}) {
@@ -79,7 +103,14 @@ function recordBeat(kind, payload = {}) {
   if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
   if (_persistEnabled()) {
     _ensureDir();
-    try { fs.appendFileSync(BEATS_FILE, JSON.stringify(beat) + '\n'); } catch (_) { /* ignore */ }
+    try {
+      if (_state.beats.length >= MAX_BEATS) {
+        _rotateFile(_state.beats);
+      } else {
+        fs.appendFileSync(BEATS_FILE, JSON.stringify(beat) + '\n');
+        try { _state._fileMtimeMs = fs.statSync(BEATS_FILE).mtimeMs; } catch (_) { /* ignore */ }
+      }
+    } catch (_) { /* ignore */ }
   }
   return beat;
 }
@@ -100,14 +131,14 @@ function score() {
     ? 40
     : (siteCat || uniCat ? 18 : 8);
 
-  const quote = _last('quote') || _last('checkout_create');
-  const checkout = _last('checkout_create');
+  const siteQ = _last('quote', 'site');
+  const uniQ = _last('quote', 'unicorn') || _last('quote', 'backend');
   let quotePts = 12;
-  if (quote && checkout && quote.serviceId && quote.serviceId === checkout.serviceId) {
-    const a = Number(quote.priceUsd);
-    const b = Number(checkout.priceUsd);
+  if (siteQ && uniQ && siteQ.serviceId && siteQ.serviceId === uniQ.serviceId) {
+    const a = Number(siteQ.priceUsd);
+    const b = Number(uniQ.priceUsd);
     quotePts = (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 0.05) ? 30 : 16;
-  } else if (checkout) quotePts = 20;
+  } else if (siteQ || uniQ) quotePts = 16;
 
   const siteBtc = _last('btc_rate', 'site');
   const uniBtc = _last('btc_rate', 'unicorn') || _last('btc_rate', 'backend');
@@ -117,6 +148,7 @@ function score() {
     btcPts = rel <= 0.01 ? 20 : (rel <= 0.05 ? 12 : 6);
   } else if (siteBtc || uniBtc) btcPts = 12;
 
+  const checkout = _last('checkout_create');
   const funnelPts = checkout ? 10 : 4;
   const total = Math.max(0, Math.min(100, catalogPts + quotePts + btcPts + funnelPts));
   const grade = total >= 90 ? 'A' : total >= 75 ? 'B' : total >= 55 ? 'C' : 'D';
@@ -161,6 +193,38 @@ function discovery() {
   };
 }
 
+function _senseBase(envKey, fallback) {
+  return String(process.env[envKey] || fallback).replace(/\/$/, '');
+}
+
+async function tickSense() {
+  if (_state._sensing) return { ok: true, skipped: 'in_flight' };
+  if (process.env.NODE_ENV === 'test' && process.env.CBLOS_SENSE !== '1') {
+    return { ok: true, skipped: 'test' };
+  }
+  _state._sensing = true;
+  const site = _senseBase('UNICORN_SITE_INTERNAL_URL', 'http://127.0.0.1:3001');
+  const uni = _senseBase('UNICORN_BACKEND_INTERNAL_URL', process.env.BACKEND_ORIGIN || 'http://127.0.0.1:3000');
+  const sku = encodeURIComponent(String(process.env.CBLOS_SENSE_SKU || 'starter').slice(0, 80));
+  const urls = [
+    site + '/api/catalog',
+    uni + '/api/catalog',
+    site + '/api/payment/btc-rate',
+    uni + '/api/payment/btc-rate',
+    site + '/api/pricing/' + sku,
+    uni + '/api/pricing/' + sku,
+  ];
+  try {
+    await Promise.all(urls.map((u) => fetch(u, {
+      headers: { Accept: 'application/json', 'User-Agent': 'cblos-sense/1.0' },
+      signal: AbortSignal.timeout(4000),
+    }).catch(() => null)));
+    return { ok: true, sampled: urls.length };
+  } finally {
+    _state._sensing = false;
+  }
+}
+
 function start({ intervalMs } = {}) {
   if (_state.running) return getStatus();
   _state.running = true;
@@ -171,12 +235,20 @@ function start({ intervalMs } = {}) {
     try { score(); } catch (_) { /* observe */ }
   }, ms);
   if (typeof _state._timer.unref === 'function') _state._timer.unref();
+  _state._senseTimer = setInterval(() => {
+    tickSense().catch(() => {});
+  }, ms);
+  if (typeof _state._senseTimer.unref === 'function') _state._senseTimer.unref();
+  const boot = setTimeout(() => { tickSense().catch(() => {}); }, 800);
+  if (typeof boot.unref === 'function') boot.unref();
   return getStatus();
 }
 
 function stop() {
   if (_state._timer) clearInterval(_state._timer);
+  if (_state._senseTimer) clearInterval(_state._senseTimer);
   _state._timer = null;
+  _state._senseTimer = null;
   _state.running = false;
   return getStatus();
 }
@@ -184,11 +256,13 @@ function stop() {
 function _resetForTests() {
   _state.beats = [];
   _state.lastScore = null;
+  _state._fileMtimeMs = 0;
   stop();
 }
 
 module.exports = {
   PROTOCOL,
+  MAX_BEATS,
   hashCatalog,
   recordBeat,
   score,
@@ -197,6 +271,7 @@ module.exports = {
   discovery,
   start,
   stop,
+  tickSense,
   _resetForTests,
   name: 'commerce-bond-loop-os',
 };

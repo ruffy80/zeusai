@@ -1308,6 +1308,16 @@ app.get('/api/pricing/:serviceId', async (req, res) => {
     });
   }
   if (headerSource) res.set('X-Source', headerSource);
+  try {
+    const n = Number(payload.price_usd != null ? payload.price_usd : payload.finalPrice);
+    if (Number.isFinite(n)) {
+      require('../backend/modules/commerce-bond-loop-os').recordBeat('quote', {
+        peer: 'site',
+        serviceId,
+        priceUsd: n,
+      });
+    }
+  } catch (_) { /* observe-only */ }
   return res.json(payload);
 });
 // Autoviralization — read-only status proxies are public; the trigger POST
