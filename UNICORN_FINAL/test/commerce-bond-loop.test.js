@@ -241,5 +241,35 @@ check('recordBeat re-reads peer lines before write so rotate cannot drop them', 
   assert.strictEqual(r.status, 0, (r.stderr || r.stdout || '').slice(0, 400));
 });
 
+check('stale lock is reclaimed; blocking lock never writes unlocked', () => {
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cblos-lock-'));
+  const r = spawnSync(process.execPath, ['-e', `
+    process.env.NODE_ENV = 'test';
+    process.env.CBLOS_DATA_DIR = ${JSON.stringify(dir)};
+    const fs = require('fs');
+    const path = require('path');
+    const c = require(${JSON.stringify(MOD)});
+    const p = path.join(${JSON.stringify(dir)}, 'beats.jsonl');
+    const lock = p + '.lock';
+    function lines() {
+      try { return fs.readFileSync(p, 'utf8').trim().split('\\n').filter(Boolean).length; }
+      catch (_) { return 0; }
+    }
+    c.recordBeat('catalog_snapshot', { peer: 'site', catalogHash: 'h' });
+    if (lines() !== 1) { console.error('seed'); process.exit(2); }
+    fs.writeFileSync(lock, 'stale');
+    fs.utimesSync(lock, 0, 0);
+    c.recordBeat('catalog_snapshot', { peer: 'unicorn', catalogHash: 'h' });
+    if (lines() !== 2) { console.error('stale not reclaimed lines=' + lines()); process.exit(3); }
+    fs.mkdirSync(lock);
+    c.recordBeat('quote', { peer: 'site', serviceId: 'starter', priceUsd: 1 });
+    if (lines() !== 2) { console.error('unlocked write lines=' + lines()); process.exit(4); }
+    process.exit(0);
+  `], { encoding: 'utf8', timeout: 20000 });
+  assert.strictEqual(r.status, 0, (r.stderr || r.stdout || '').slice(0, 500));
+});
+
 console.log(`\n✅ commerce-bond-loop: ${passed} tests passed\n`);
 process.exit(0);

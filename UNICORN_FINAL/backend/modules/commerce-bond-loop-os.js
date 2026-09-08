@@ -4,8 +4,8 @@
  * Site↔backend profit-path alignment without inventing GMV.
  *
  * Two processes share beats via data/cblos/beats.jsonl (capped + rotated).
- * Writers take a lock, re-read the file, then append/rotate so a peer's
- * lines are never dropped. Score always reloads from disk (≤200 lines).
+ * Writers take an exclusive lock, re-read, then append/rotate. If the lock
+ * cannot be acquired, persist is skipped (never write unlocked).
  *
  * Score (0–100):
  *   40 catalog id+price hash match (site vs unicorn)
@@ -49,31 +49,33 @@ function _sleepMs(ms) {
   while (Date.now() < until) { /* short lock wait */ }
 }
 
+const LOCK_STALE_MS = 400;
+const LOCK_ATTEMPTS = 80;
+
 function _withBeatsLock(fn) {
   if (!_persistEnabled()) return fn();
   _ensureDir();
   const lockPath = BEATS_FILE + '.lock';
   let fd = null;
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < LOCK_ATTEMPTS; i++) {
     try {
       fd = fs.openSync(lockPath, 'wx');
       break;
     } catch (e) {
-      if (!e || e.code !== 'EEXIST') break;
+      if (!e || e.code !== 'EEXIST') return undefined;
       try {
         const age = Date.now() - fs.statSync(lockPath).mtimeMs;
-        if (age > 2500) fs.unlinkSync(lockPath);
+        if (age > LOCK_STALE_MS) fs.unlinkSync(lockPath);
       } catch (_) { /* ignore */ }
       _sleepMs(5);
     }
   }
+  if (fd == null) return undefined;
   try {
     return fn();
   } finally {
-    if (fd != null) {
-      try { fs.closeSync(fd); } catch (_) { /* ignore */ }
-      try { fs.unlinkSync(lockPath); } catch (_) { /* ignore */ }
-    }
+    try { fs.closeSync(fd); } catch (_) { /* ignore */ }
+    try { fs.unlinkSync(lockPath); } catch (_) { /* ignore */ }
   }
 }
 
@@ -136,7 +138,7 @@ function recordBeat(kind, payload = {}) {
     if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
     return beat;
   }
-  _withBeatsLock(() => {
+  const persisted = _withBeatsLock(() => {
     _hydrate();
     _state.beats.push(beat);
     if (_state.beats.length > MAX_BEATS) _state.beats.splice(0, _state.beats.length - MAX_BEATS);
@@ -145,7 +147,12 @@ function recordBeat(kind, payload = {}) {
     } else {
       fs.appendFileSync(BEATS_FILE, JSON.stringify(beat) + '\n');
     }
+    return true;
   });
+  if (persisted !== true) {
+    // Fail closed: never append/rotate without the exclusive lock.
+    return beat;
+  }
   return beat;
 }
 
